@@ -3,7 +3,7 @@
 # Flathub doesn't allow that: for Flathub, vendor the sources with flatpak-cargo-generator and drop build-args.
 app-id: org.burncraft.BurnCraft
 runtime: org.freedesktop.Platform
-runtime-version: '24.08'
+runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
