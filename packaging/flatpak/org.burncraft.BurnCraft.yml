@@ -1,0 +1,39 @@
+# Flatpak build: flatpak-builder --user --install build packaging/flatpak/org.burncraft.BurnCraft.yml
+# The build downloads crates (build-args --share=network), which is fine locally and on GitHub Actions.
+# Flathub doesn't allow that: for Flathub, vendor the sources with flatpak-cargo-generator and drop build-args.
+app-id: org.burncraft.BurnCraft
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: burncraft
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --device=all          # USB / serial lasers
+  - --share=network       # optional AI outline services
+  - --filesystem=xdg-documents
+  - --filesystem=xdg-download
+  - --filesystem=xdg-pictures
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  build-args:
+    - --share=network
+  env:
+    CARGO_HOME: /run/build/burncraft/cargo
+modules:
+  - name: burncraft
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --locked
+      - install -Dm755 target/release/burncraft /app/bin/burncraft
+      - install -Dm644 packaging/linux/burncraft.desktop /app/share/applications/org.burncraft.BurnCraft.desktop
+      - install -Dm644 packaging/linux/org.burncraft.BurnCraft.metainfo.xml /app/share/metainfo/org.burncraft.BurnCraft.metainfo.xml
+      - install -Dm644 packaging/icons/burncraft.svg /app/share/icons/hicolor/scalable/apps/org.burncraft.BurnCraft.svg
+      - install -Dm644 packaging/icons/burncraft-256.png /app/share/icons/hicolor/256x256/apps/org.burncraft.BurnCraft.png
+    sources:
+      - type: dir
+        path: ../..

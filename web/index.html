@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>BurnCraft</title>
+  <meta name="theme-color" content="#7a1034">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="favicon.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <!-- Trunk builds the Rust app into WebAssembly -->
+  <link data-trunk rel="rust" href="../Cargo.toml" data-bin="burncraft" />
+  <link data-trunk rel="copy-dir" href="icons" />
+  <link data-trunk rel="copy-file" href="favicon.png" />
+  <link data-trunk rel="copy-file" href="manifest.webmanifest" />
+  <link data-trunk rel="copy-file" href="sw.js" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1c1d20; }
+    canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  </style>
+</head>
+<body>
+  <canvas id="burncraft"></canvas>
+  <script>
+    if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js"); }
+  </script>
+</body>
+</html>

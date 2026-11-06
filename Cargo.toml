@@ -1,0 +1,98 @@
+[package]
+name = "burncraft"
+version = "0.1.0"
+edition = "2021"
+description = "BurnCraft: an open-source laser design and control app (LightBurn-compatible projects)"
+readme = "README.md"
+homepage = "https://github.com/amruthwo/BurnCraft"
+repository = "https://github.com/amruthwo/BurnCraft"
+license = "GPL-3.0-or-later"
+keywords = ["laser", "cnc", "cad", "lightburn", "gcode"]
+categories = ["graphics", "science::robotics"]
+
+[[bin]]
+name = "burncraft"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
+egui = "0.37"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp", "tiff"] }
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+directories = "6"
+geo = "0.33"
+ab_glyph = "0.2"
+fontdb = "0.24"
+vtracer = "0.6"
+visioncortex = "0.8"
+qrcode = { version = "0.14", default-features = false }
+barcoders = "2"
+datamatrix = "0.3"
+
+# Desktop only: windows on Wayland/X11, native dialogs, USB/serial lasers, HTTPS to AI services.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+serialport = { version = "4.10", default-features = false }
+ureq = { version = "3", features = ["json"] }
+
+# Browser / PWA build (`trunk build --release`, see web/).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# ---------------------------------------------------------------- packaging
+# Installers are made by `cargo packager --release` (cargo-packager): .deb, .AppImage, .dmg, .app, .msi (WiX), NSIS .exe.
+[package.metadata.packager]
+product-name = "BurnCraft"
+identifier = "org.burncraft.BurnCraft"
+category = "GraphicsAndDesign"
+description = "Design, trace and burn — an open-source laser app that opens LightBurn projects"
+before-packaging-command = "cargo build --release"
+out-dir = "dist"
+icons = ["packaging/icons/burncraft.png", "packaging/icons/burncraft.ico", "packaging/icons/burncraft.icns"]
+formats = ["deb", "appimage", "dmg", "app", "wix", "nsis"]
+resources = []
+
+[package.metadata.packager.deb]
+depends = ["libgl1", "libxkbcommon0", "libwayland-client0"]
+desktop-template = "packaging/linux/burncraft.desktop"
+
+[package.metadata.packager.appimage]
+bins = []
+
+# .rpm via `cargo generate-rpm` (cargo-generate-rpm)
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/burncraft", dest = "/usr/bin/burncraft", mode = "755" },
+    { source = "packaging/linux/burncraft.desktop", dest = "/usr/share/applications/org.burncraft.BurnCraft.desktop", mode = "644" },
+    { source = "packaging/icons/burncraft.svg", dest = "/usr/share/icons/hicolor/scalable/apps/org.burncraft.BurnCraft.svg", mode = "644" },
+    { source = "packaging/linux/org.burncraft.BurnCraft.metainfo.xml", dest = "/usr/share/metainfo/org.burncraft.BurnCraft.metainfo.xml", mode = "644" },
+    { source = "packaging/icons/burncraft-16.png", dest = "/usr/share/icons/hicolor/16x16/apps/org.burncraft.BurnCraft.png", mode = "644" },
+    { source = "packaging/icons/burncraft-24.png", dest = "/usr/share/icons/hicolor/24x24/apps/org.burncraft.BurnCraft.png", mode = "644" },
+    { source = "packaging/icons/burncraft-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/org.burncraft.BurnCraft.png", mode = "644" },
+    { source = "packaging/icons/burncraft-48.png", dest = "/usr/share/icons/hicolor/48x48/apps/org.burncraft.BurnCraft.png", mode = "644" },
+    { source = "packaging/icons/burncraft-64.png", dest = "/usr/share/icons/hicolor/64x64/apps/org.burncraft.BurnCraft.png", mode = "644" },
+    { source = "packaging/icons/burncraft-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/org.burncraft.BurnCraft.png", mode = "644" },
+    { source = "packaging/icons/burncraft-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/org.burncraft.BurnCraft.png", mode = "644" },
+    { source = "packaging/icons/burncraft-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/org.burncraft.BurnCraft.png", mode = "644" },
+]
+release = "1"
+summary = "Laser design and control app that opens LightBurn projects"
+license = "GPL-3.0-or-later"
+[package.metadata.generate-rpm.requires]
+mesa-libGL = "*"
+libxkbcommon = "*"

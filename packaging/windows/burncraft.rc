@@ -1,0 +1,29 @@
+// Windows resources: the app icon and version information.
+// Rebuild the linked objects (from packaging/windows) with:
+//   zig rc /:output-format coff /:target x64 /fo burncraft-res-x86_64.o burncraft.rc
+//   zig rc /:output-format coff /:target arm64 /fo burncraft-res-aarch64.o burncraft.rc
+1 ICON "../icons/burncraft.ico"
+
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "BurnCraft"
+      VALUE "FileDescription", "BurnCraft - laser design and control"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "ProductName", "BurnCraft"
+      VALUE "ProductVersion", "0.1.0"
+      VALUE "OriginalFilename", "burncraft.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

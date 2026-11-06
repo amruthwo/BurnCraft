@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=BurnCraft
+GenericName=Laser Design and Control
+Comment=Design, trace and burn — opens LightBurn projects
+Exec=burncraft %f
+Icon=org.burncraft.BurnCraft
+Terminal=false
+Categories=Graphics;2DGraphics;VectorGraphics;Engineering;
+Keywords=laser;engraver;cnc;grbl;lightburn;gcode;
+MimeType=application/x-lightburn;image/png;image/jpeg;
+StartupWMClass=org.burncraft.BurnCraft

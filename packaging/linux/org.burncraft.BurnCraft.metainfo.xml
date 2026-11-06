@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.burncraft.BurnCraft</id>
+  <name>BurnCraft</name>
+  <summary>Design, trace and burn with your laser</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <url type="homepage">https://github.com/amruthwo/BurnCraft</url>
+  <description>
+    <p>BurnCraft is an open-source laser design and control app. It opens LightBurn projects, has a tabbed
+    ribbon with CAD-style controls, image tracing (including AI tools of your choice through MCP), and drives
+    GRBL lasers over USB.</p>
+  </description>
+  <launchable type="desktop-id">org.burncraft.BurnCraft.desktop</launchable>
+  <provides>
+    <binary>burncraft</binary>
+  </provides>
+  <categories>
+    <category>Graphics</category>
+    <category>Engineering</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+</component>

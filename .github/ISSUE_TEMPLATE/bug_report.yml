@@ -1,0 +1,75 @@
+# Bug report form. BurnCraft is a hobby project: replies may be slow (see the README).
+name: Bug report
+description: Something in BurnCraft doesn't work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! BurnCraft is a hobby project, so replies and fixes may be slow.
+        If a laser did something unexpected, please stop using BurnCraft with it until the problem is understood.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: BurnCraft version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - Windows
+        - macOS
+        - Web browser
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os_details
+    attributes:
+      label: OS version and CPU
+      placeholder: "Fedora 44, x86_64 / Windows 11 on ARM / macOS 15 on Apple Silicon"
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - .rpm
+        - .deb
+        - AppImage
+        - Flatpak
+        - Portable .tar.gz / .zip
+        - Windows installer (.msi / setup .exe)
+        - macOS .dmg / .app
+        - Built from source
+        - Web / PWA
+  - type: input
+    id: laser
+    attributes:
+      label: Laser and controller (if it's about a laser)
+      placeholder: "Creality Falcon2 12W, GRBL 1.1 over USB"
+  - type: textarea
+    id: files
+    attributes:
+      label: Screenshots, project files or G-code
+      description: Drag files here. Only share project files you're allowed to share.

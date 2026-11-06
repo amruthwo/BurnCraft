@@ -1,0 +1,28 @@
+# Build output (installers go on GitHub Releases, not in the repo)
+target/
+dist/
+*.png.tmp
+
+# Original program and reverse-engineering material: never publish
+*.exe
+investigation.cany/
+capture/
+reference/
+MECHANICS.md
+mechanics.json
+cleanup-for-github.md
+
+# Craft Anything working files (prompts, local paths, usage/cost, logs)
+craft.json
+feed.json
+usage.json
+build-activity.log
+agent-session.jsonl
+*.jsonl
+checks/
+shots/
+pinned/
+inbox/
+
+# Test files and screenshots supplied by the owner (third-party designs, desktop screenshots)
+attachments/
