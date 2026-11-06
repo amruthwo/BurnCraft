@@ -1,0 +1,41 @@
+# Publishes the browser version to GitHub Pages (https://amruthwo.github.io/BurnCraft/).
+# Runs on version tags like v0.1.0, so the web version matches the latest release, or by hand from the Actions tab.
+name: Web (GitHub Pages)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deployment at a time; a newer run waits instead of cancelling one in progress
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
+      - run: cargo install trunk --locked
+      # relative URLs, because Pages serves the site from /BurnCraft/ rather than the domain root
+      - run: trunk build --release --public-url ./ web/index.html --dist dist/web
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist/web }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

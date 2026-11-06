@@ -70,6 +70,10 @@ Get the latest version from [Releases](https://github.com/amruthwo/BurnCraft/rel
 | macOS | ✓ | ✓ | | universal .dmg and zipped .app |
 | Web / PWA | wasm32 | | | static site (installable) |
 
+**Try it in your browser:** <https://amruthwo.github.io/BurnCraft/>. This is a preview for trying out the
+interface. The browser version can't open, save or export files, connect to a laser, or make AI outlines yet, so
+use the desktop app for real work.
+
 The installers aren't code-signed. On **Windows**, SmartScreen may warn you: choose *More info → Run anyway*.
 On **macOS**, right-click the app and choose *Open* the first time.
 
