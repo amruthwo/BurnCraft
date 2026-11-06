@@ -40,6 +40,9 @@ jobs:
           tar -C target/${{ matrix.target }}/release -czf dist/burncraft-linux-${{ matrix.arch }}.tar.gz burncraft
       - name: .deb, .rpm, .AppImage
         if: ${{ !matrix.cross }}
+        env:
+          # linuxdeploy's bundled strip is too old for current Rust binaries and quits without an error
+          NO_STRIP: "true"
         run: |
           # the AppImage tools are themselves AppImages and need FUSE 2, which Ubuntu 24.04 leaves out
           sudo apt-get update && sudo apt-get install -y libfuse2t64
@@ -74,8 +77,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-pc-windows-msvc, arch: x86_64 }
-          - { target: aarch64-pc-windows-msvc, arch: arm64 }
+          - { target: x86_64-pc-windows-msvc, arch: x86_64, formats: "wix,nsis" }
+          # WiX 3 (.msi) can't build arm64 installers, so arm64 gets the NSIS setup .exe only
+          - { target: aarch64-pc-windows-msvc, arch: arm64, formats: "nsis" }
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +89,7 @@ jobs:
       - name: .msi and setup .exe
         run: |
           cargo install cargo-packager --locked
-          cargo packager --release --formats wix,nsis --target ${{ matrix.target }}
+          cargo packager --release --formats ${{ matrix.formats }} --target ${{ matrix.target }}
         continue-on-error: true
       - name: Portable zip
         shell: pwsh
