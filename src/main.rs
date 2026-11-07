@@ -3,16 +3,20 @@
 mod actions;
 mod app;
 mod barcode;
+mod camera;
 mod canvas;
 mod dialogs;
 mod dims;
+mod ezd;
 mod fonts;
+mod galvo;
 mod gcode;
 mod help;
 mod geom;
 mod icons;
 mod imaging;
 mod join;
+mod k40;
 mod laser;
 mod lbrn;
 mod mcp;
@@ -33,6 +37,7 @@ mod ai;
 mod text;
 mod theme;
 mod tour;
+mod vartext;
 mod xml;
 
 use app::{App, Screenshot};
@@ -75,6 +80,20 @@ impl Root {
             app.current_layer = 1;
             // BURNCRAFT_TOUR=<step> shows that tour step, BURNCRAFT_HELP=<topic> the Help window
             app.tour = std::env::var("BURNCRAFT_TOUR").ok().and_then(|v| v.parse().ok());
+            // BURNCRAFT_WIN=vartext / camera opens that window in the screenshot
+            match std::env::var("BURNCRAFT_WIN").unwrap_or_default().as_str() {
+                "vartext" => {
+                    app.win_vartext = true;
+                    app.doc.vartext.load("names.csv", "Name,Town\nAda Lovelace,London\nGrace Hopper,New York\nAlan Turing,Wilmslow\n");
+                    app.sel = vec![2];
+                }
+                "camera" => app.win_camera = true,
+                "galvo" => {
+                    app.settings.device.controller = gcode::Controller::EzCad2;
+                    app.win_settings = true;
+                }
+                _ => {}
+            }
             if let Some(t) = std::env::var("BURNCRAFT_HELP").ok().and_then(|v| v.parse().ok()) {
                 app.win_help = true;
                 app.help_topic = t;
@@ -240,6 +259,63 @@ impl eframe::App for Root {
         let mut run = Vec::new();
         self.handle_keys(&ctx, &mut run);
         let app = &mut self.app;
+        let now = ctx.input(|i| i.time);
+        // the current variable-text row, for the text outlines drawn this frame
+        vartext::set_current(&app.doc.vartext);
+        // files dropped on the window (the browser hands over their contents)
+        for f in ctx.input(|i| i.raw.dropped_files.clone()) {
+            #[cfg(not(target_arch = "wasm32"))]
+            app.open_path(f.path().to_path_buf(), now);
+            #[cfg(target_arch = "wasm32")]
+            {
+                let name = f.path().to_string_lossy().to_string();
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Ok(b) = f.bytes_async().await {
+                        platform::push_picked(app::Pick::Open as u8, name, b);
+                    }
+                });
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        for (purpose, name, bytes) in platform::take_picked() {
+            if let Some(p) = app::Pick::from_u8(purpose) {
+                app.picked(p, &name, bytes, None, now);
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        // camera: start the saved source when the window opens, take in new pictures
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if app.win_camera && app.camera.is_none() && app.camera_frame.is_none() && app.camera_error.is_none() && !app.settings.camera.source.is_empty() {
+                app.camera = Some(camera::Capture::start(&app.settings.camera.source, app.settings.camera.interval));
+                app.camera_tex = None;
+            }
+            let got = app.camera.as_ref().and_then(|c| c.latest.lock().ok().and_then(|mut g| g.take()));
+            match got {
+                Some(Ok(f)) => {
+                    app.camera_frame = Some(f);
+                    app.camera_error = None;
+                }
+                Some(Err(e)) => app.camera_error = Some(e),
+                None => {}
+            }
+            if app.camera.is_some() {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+            }
+        }
+        if let Some(f) = &app.camera_frame {
+            if app.camera_tex.as_ref().map(|t| t.0) != Some(f.seq) || app.camera_tex.is_none() {
+                let img = egui::ColorImage::from_rgba_unmultiplied([f.w, f.h], &f.rgba);
+                match &mut app.camera_tex {
+                    Some((seq, tex)) => {
+                        tex.set(img, egui::TextureOptions::LINEAR);
+                        *seq = f.seq;
+                    }
+                    None => app.camera_tex = Some((f.seq, ctx.load_texture("camera", img, egui::TextureOptions::LINEAR))),
+                }
+            }
+        }
 
         let title = app.title();
         if title != self.last_title {
@@ -334,6 +410,22 @@ impl eframe::App for Root {
             }
         } else if app.net_job.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        // a K40 job or command finished?
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let done = app.usb_job.as_ref().and_then(|r| r.result.lock().ok().and_then(|mut g| g.take()));
+            if let Some(r) = done {
+                app.usb_job = None;
+                app.job_started = None;
+                let now = ctx.input(|i| i.time);
+                match r {
+                    Ok(m) => app.toast(m, now),
+                    Err(e) => app.error(format!("{}: {e}", if app.settings.device.controller == gcode::Controller::K40Nano { "K40" } else { "Galvo" }), now),
+                }
+            } else if app.usb_job.is_some() {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+            }
         }
         if app.laser.poll() || app.laser.connected {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));

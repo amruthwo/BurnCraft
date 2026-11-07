@@ -37,12 +37,20 @@ arboard = { version = "3", default-features = false, features = ["image-data", "
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 serialport = { version = "4.10", default-features = false }
+# K40 M2 Nano boards over USB (pure Rust, no libusb).
+nusb = "0.2"
 ureq = { version = "3", features = ["json"] }
+
+# Linux: USB cameras through V4L2.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 # Browser / PWA build (`trunk build --release`, see web/).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "Element", "HtmlElement", "HtmlInputElement", "HtmlAnchorElement", "FileList", "File", "Blob", "BlobPropertyBag", "Url", "Storage"] }
 
 [profile.release]
 opt-level = 3
@@ -70,6 +78,7 @@ resources = []
 [package.metadata.packager.deb]
 depends = ["libgl1", "libxkbcommon0", "libwayland-client0"]
 desktop-template = "packaging/linux/burncraft.desktop"
+files = { "packaging/linux/70-burncraft-k40.rules" = "usr/lib/udev/rules.d/70-burncraft-k40.rules" }
 
 [package.metadata.packager.appimage]
 bins = []
@@ -81,6 +90,7 @@ assets = [
     { source = "packaging/linux/burncraft.desktop", dest = "/usr/share/applications/org.burncraft.BurnCraft.desktop", mode = "644" },
     { source = "packaging/icons/burncraft.svg", dest = "/usr/share/icons/hicolor/scalable/apps/org.burncraft.BurnCraft.svg", mode = "644" },
     { source = "packaging/linux/org.burncraft.BurnCraft.metainfo.xml", dest = "/usr/share/metainfo/org.burncraft.BurnCraft.metainfo.xml", mode = "644" },
+    { source = "packaging/linux/70-burncraft-k40.rules", dest = "/usr/lib/udev/rules.d/70-burncraft-k40.rules", mode = "644" },
     { source = "packaging/icons/burncraft-16.png", dest = "/usr/share/icons/hicolor/16x16/apps/org.burncraft.BurnCraft.png", mode = "644" },
     { source = "packaging/icons/burncraft-24.png", dest = "/usr/share/icons/hicolor/24x24/apps/org.burncraft.BurnCraft.png", mode = "644" },
     { source = "packaging/icons/burncraft-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/org.burncraft.BurnCraft.png", mode = "644" },

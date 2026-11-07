@@ -49,6 +49,7 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Machine", vec![LaserConnect, LaserHome]),
             ("Job", vec![Preview, PreviewPlay, LaserFrame, LaserStart, LaserPause, LaserStop]),
             ("Output", vec![ExportGcode, SaveLayerDefaults]),
+            ("Extras", vec![VariableText, Camera]),
         ],
         RibbonTab::View => vec![
             ("Zoom", vec![ZoomIn, ZoomOut, ZoomPage, ZoomSelection]),

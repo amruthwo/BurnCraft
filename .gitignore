@@ -11,6 +11,7 @@ reference/
 MECHANICS.md
 mechanics.json
 cleanup-for-github.md
+notes-for-claude-code.md
 
 # Craft Anything working files (prompts, local paths, usage/cost, logs)
 craft.json

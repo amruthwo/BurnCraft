@@ -26,14 +26,18 @@ pub enum Controller {
     EzCad2,
     EzCad3,
     Bsl,
+    /// K40 lasers with the Lihuiyu M2 Nano board (USB, see k40.rs).
+    K40Nano,
 }
 
-/// LightBurn's device families (strings "G-code", "dsp controller type", "galvo controller type").
+/// LightBurn's device families (strings "G-code", "dsp controller type", "galvo controller type"), plus the
+/// K40's Lihuiyu boards.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
     GCode,
     Dsp,
     Galvo,
+    Lihuiyu,
 }
 
 /// How far BurnCraft can drive a controller.
@@ -43,12 +47,14 @@ pub enum Support {
     Full,
     /// Saved job files and sending over the network (Ruida).
     FileAndNetwork,
+    /// Its own USB protocol and saved .egv files (K40 M2 Nano).
+    Usb,
     /// Listed so you know where it stands; its protocol isn't implemented yet.
     NotYet,
 }
 
 impl Controller {
-    pub const ALL: [Controller; 15] = [
+    pub const ALL: [Controller; 16] = [
         Controller::Grbl,
         Controller::GrblM3,
         Controller::GrblLpc,
@@ -64,18 +70,21 @@ impl Controller {
         Controller::EzCad2,
         Controller::EzCad3,
         Controller::Bsl,
+        Controller::K40Nano,
     ];
     pub fn family(self) -> Family {
         match self {
             Controller::Ruida | Controller::Trocen | Controller::TopWisdom => Family::Dsp,
             Controller::EzCad2 | Controller::EzCad3 | Controller::Bsl => Family::Galvo,
+            Controller::K40Nano => Family::Lihuiyu,
             _ => Family::GCode,
         }
     }
     pub fn support(self) -> Support {
         match self {
             Controller::Ruida => Support::FileAndNetwork,
-            Controller::Trocen | Controller::TopWisdom | Controller::EzCad2 | Controller::EzCad3 | Controller::Bsl => Support::NotYet,
+            Controller::K40Nano | Controller::EzCad2 => Support::Usb,
+            Controller::Trocen | Controller::TopWisdom | Controller::EzCad3 | Controller::Bsl => Support::NotYet,
             _ => Support::Full,
         }
     }
@@ -96,6 +105,7 @@ impl Controller {
             Controller::EzCad2 => "EZCad2 / JCZ (fiber, UV, CO2 galvo)",
             Controller::EzCad3 => "EZCad3",
             Controller::Bsl => "BSL galvo",
+            Controller::K40Nano => "K40 (Lihuiyu M2 Nano)",
         }
     }
     pub fn id(self) -> &'static str {
@@ -115,6 +125,7 @@ impl Controller {
             Controller::EzCad2 => "ezcad2",
             Controller::EzCad3 => "ezcad3",
             Controller::Bsl => "bsl",
+            Controller::K40Nano => "k40-nano",
         }
     }
     pub fn from_id(s: &str) -> Controller {
@@ -125,6 +136,8 @@ impl Controller {
         let k = kind.to_ascii_lowercase();
         if k.contains("ruida") {
             Controller::Ruida
+        } else if k.contains("lihuiyu") || k.contains("nano") || k.contains("k40") {
+            Controller::K40Nano
         } else if k.contains("trocen") {
             Controller::Trocen
         } else if k.contains("topwisdom") {
@@ -218,11 +231,15 @@ pub struct Device {
     pub baud: u32,
     pub port: String,
     pub dynamic_power: bool,
+    /// K40 controller board model ("M2", "M1", "M", "B2", "B1", "B", "A"); it sets the speed codes.
+    pub board: String,
+    /// Galvo (JCZ / LMC) machine settings.
+    pub galvo: crate::galvo::GalvoSettings,
 }
 
 impl Default for Device {
     fn default() -> Self {
-        Device { controller: Controller::Grbl, ip: String::new(), opt: CutOptimize::default(), name: "GRBL laser".into(), width: LBDEV_DEFAULT_WIDTH, height: LBDEV_DEFAULT_HEIGHT, s_max: 1000.0, rapid_speed: 100.0, baud: 115200, port: String::new(), dynamic_power: true }
+        Device { controller: Controller::Grbl, ip: String::new(), opt: CutOptimize::default(), name: "GRBL laser".into(), width: LBDEV_DEFAULT_WIDTH, height: LBDEV_DEFAULT_HEIGHT, s_max: 1000.0, rapid_speed: 100.0, baud: 115200, port: String::new(), dynamic_power: true, board: "M2".into(), galvo: Default::default() }
     }
 }
 
@@ -254,6 +271,12 @@ pub fn devices_from_lbdev(text: &str) -> Result<(Vec<Device>, Vec<String>), Stri
             if let Some(baud) = pick(&["BaudRate", "Baud"]) {
                 dev.baud = baud as u32;
             }
+        }
+        // a galvo's work area is its lens field: square, from the file's width when it has one
+        if controller == Controller::EzCad2 {
+            dev.galvo.lens = d.get("Width").and_then(|x| x.as_f64()).filter(|x| *x > 0.0).unwrap_or(dev.galvo.lens);
+            dev.width = dev.galvo.lens;
+            dev.height = dev.galvo.lens;
         }
         out.push(dev);
     }
@@ -689,11 +712,13 @@ mod lbdev_tests {
     use super::*;
     #[test]
     fn reads_a_lightburn_device_profile() {
-        let text = r#"{"DeviceList":[{"Name":"My Laser","Type":"GRBL","Width":410,"Height":400,"Settings":{"MaxSValue":"1000"}},{"Name":"Galvo","Type":"EzCad2"}]}"#;
+        let text = r#"{"DeviceList":[{"Name":"My Laser","Type":"GRBL","Width":410,"Height":400,"Settings":{"MaxSValue":"1000"}},{"Name":"Galvo","Type":"EzCad2"},{"Name":"Old DSP","Type":"Trocen"}]}"#;
         let (devs, notes) = devices_from_lbdev(text).unwrap();
-        assert_eq!(devs.len(), 2);
+        assert_eq!(devs.len(), 3);
+        assert_eq!(devs[1].controller, Controller::EzCad2);
         assert_eq!((devs[0].name.as_str(), devs[0].width, devs[0].height), ("My Laser", 410.0, 400.0));
-        assert_eq!((devs[1].width, devs[1].height), (LBDEV_DEFAULT_WIDTH, LBDEV_DEFAULT_HEIGHT));
+        assert_eq!((devs[1].width, devs[1].height), (110.0, 110.0), "galvo: the lens field");
+        assert_eq!((devs[2].width, devs[2].height), (LBDEV_DEFAULT_WIDTH, LBDEV_DEFAULT_HEIGHT));
         assert_eq!(notes.len(), 1);
         assert!(devices_from_lbdev("{}").is_err());
     }

@@ -343,6 +343,36 @@ pub struct App {
     pub hover_action: Option<Action>,
     pub offset_preview: Vec<Vec<P2>>,
     pub offset_opts: crate::ops::OffsetOpts,
+    pub win_vartext: bool,
+    pub win_camera: bool,
+    /// A job or command being sent to a K40 over USB.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub usb_job: Option<crate::k40::usb::Running>,
+    /// The camera reading pictures in the background.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub camera: Option<crate::camera::Capture>,
+    /// The latest camera picture (or the loaded photo) and its texture.
+    pub camera_frame: Option<crate::camera::Frame>,
+    pub camera_tex: Option<(u64, egui::TextureHandle)>,
+    pub camera_error: Option<String>,
+    /// Which alignment point the next click in the camera window sets (0..4).
+    pub camera_pick: Option<usize>,
+}
+
+/// What a chosen file is for (the browser hands files over later, so the purpose travels with it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pick {
+    Open = 1,
+    Import = 2,
+    VarText = 3,
+    CameraPhoto = 4,
+    Lbdev = 5,
+}
+
+impl Pick {
+    pub fn from_u8(v: u8) -> Option<Pick> {
+        [Pick::Open, Pick::Import, Pick::VarText, Pick::CameraPhoto, Pick::Lbdev].into_iter().find(|p| *p as u8 == v)
+    }
 }
 
 impl App {
@@ -436,6 +466,16 @@ impl App {
             hover_action: None,
             offset_preview: Vec::new(),
             offset_opts: Default::default(),
+            win_vartext: false,
+            win_camera: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            usb_job: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            camera: None,
+            camera_frame: None,
+            camera_tex: None,
+            camera_error: None,
+            camera_pick: None,
         }
     }
 
@@ -516,6 +556,12 @@ impl App {
             Action::Undo => !self.undo.is_empty(),
             Action::Redo => !self.redo.is_empty(),
             Action::TraceImage | Action::TraceMcp | Action::ImageInvert | Action::ImageReset => self.selected_bitmap().is_some(),
+            // the K40 is opened over USB for each job, so there's nothing to connect first (no pause on its board)
+            Action::LaserHome | Action::LaserStop if self.settings.device.controller == gcode::Controller::K40Nano => !cfg!(target_arch = "wasm32"),
+            Action::LaserPause if self.settings.device.controller == gcode::Controller::K40Nano => false,
+            // galvo: no homing, pause or job file; Stop always reaches the board
+            Action::LaserHome | Action::LaserPause | Action::ExportGcode if self.settings.device.controller == gcode::Controller::EzCad2 => false,
+            Action::LaserStop if self.settings.device.controller == gcode::Controller::EzCad2 => !cfg!(target_arch = "wasm32"),
             Action::LaserHome | Action::LaserPause | Action::LaserStop => self.laser.connected,
             Action::LaserStart | Action::LaserFrame => !self.doc.shapes.is_empty(),
             Action::Preview | Action::ExportGcode | Action::PreviewPlay => !self.doc.shapes.is_empty(),
@@ -738,8 +784,8 @@ impl App {
     }
 
     /// Set up the laser from a LightBurn device profile (.lbdev); the first laser in the file is used.
-    pub fn import_lbdev(&mut self, p: &std::path::Path, now: f64) {
-        match std::fs::read_to_string(p).map_err(|e| e.to_string()).and_then(|t| crate::gcode::devices_from_lbdev(&t)) {
+    pub fn import_lbdev(&mut self, text: &str, now: f64) {
+        match crate::gcode::devices_from_lbdev(text) {
             Ok((devs, notes)) => {
                 let d = devs[0].clone();
                 let keep_port = std::mem::take(&mut self.settings.device.port);
@@ -756,17 +802,113 @@ impl App {
         }
     }
 
+    /// Open a file from disk (command line, recent files, dropped files).
     pub fn open_path(&mut self, p: PathBuf, now: f64) {
-        let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        match std::fs::read(&p) {
+            Ok(bytes) => self.open_bytes(&p.to_string_lossy(), bytes, Some(p.clone()), now),
+            Err(e) => self.error(format!("Could not open the file: {e}"), now),
+        }
+    }
+
+    /// Show a file picker (desktop) or the browser's picker; the file then goes to `picked`.
+    pub fn pick_file(&mut self, purpose: Pick, label: &str, exts: &[&str], now: f64) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(p) = crate::platform::FileDialog::new().add_filter(label, exts).add_filter("All files", &["*"]).pick_file() {
+                match std::fs::read(&p) {
+                    Ok(bytes) => self.picked(purpose, &p.to_string_lossy(), bytes, Some(p.clone()), now),
+                    Err(e) => self.error(format!("Could not read the file: {e}"), now),
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (label, now);
+            crate::platform::request_file(purpose as u8, exts);
+        }
+    }
+
+    /// A file arrived (picked, dropped or loaded in the browser).
+    pub fn picked(&mut self, purpose: Pick, name: &str, bytes: Vec<u8>, path: Option<PathBuf>, now: f64) {
+        match purpose {
+            Pick::Open => self.open_bytes(name, bytes, path, now),
+            Pick::Import => self.import_bytes(name, bytes, now),
+            Pick::Lbdev => self.import_lbdev(&String::from_utf8_lossy(&bytes), now),
+            Pick::VarText => {
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                let short = std::path::Path::new(name).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
+                self.doc.vartext.load(&short, &text);
+                self.dirty = true;
+                self.touch();
+                let v = &self.doc.vartext;
+                self.toast(format!("{} row(s) loaded from {short}{}", v.rows.len(), if v.headers.is_empty() { String::new() } else { format!(" · columns: {}", v.headers.join(", ")) }), now);
+            }
+            Pick::CameraPhoto => match crate::camera::decode(&bytes, 1) {
+                Ok(f) => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.camera = None;
+                    }
+                    self.camera_frame = Some(f);
+                    self.camera_tex = None;
+                    self.camera_error = None;
+                    self.settings.camera.source.clear();
+                }
+                Err(e) => self.error(format!("Could not use that photo: {e}"), now),
+            },
+        }
+    }
+
+    /// Save bytes: a save dialog on desktop (returns the path), a download in the browser (returns None).
+    /// Err(None) = cancelled.
+    pub fn save_file(&mut self, label: &str, exts: &[&str], name: &str, bytes: &[u8]) -> Result<Option<PathBuf>, Option<String>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some(p) = crate::platform::FileDialog::new().add_filter(label, exts).set_file_name(name).save_file() else { return Err(None) };
+            std::fs::write(&p, bytes).map(|_| Some(p)).map_err(|e| Some(e.to_string()))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (label, exts);
+            let mime = if name.ends_with(".lbrn2") { "application/xml" } else { "application/octet-stream" };
+            crate::platform::download(name, bytes, mime).map(|_| None).map_err(Some)
+        }
+    }
+
+    /// After a job starts: the next variable-text row and serial number, when that's switched on and the
+    /// project has variable text.
+    pub fn advance_variable_text(&mut self, now: f64) {
+        let has = self.doc.shapes.iter().any(|s| matches!(&s.kind, ShapeKind::Text { style, .. } if style.variable));
+        if !has || !self.doc.vartext.advance {
+            return;
+        }
+        self.doc.vartext.advance_row();
+        crate::vartext::set_current(&self.doc.vartext);
+        // the job already built keeps the old text; the canvas shows the next one
+        let job = self.job.take();
+        self.touch();
+        self.job = job;
+        let v = &self.doc.vartext;
+        let row = if v.rows.is_empty() { String::new() } else { format!("row {} of {}, ", v.row + 1, v.rows.len()) };
+        self.toast(format!("Variable text: next is {row}serial {}", v.serial_text()), now);
+    }
+
+    /// Open a project (or hand pictures, device profiles and EZCad files to import).
+    pub fn open_bytes(&mut self, name: &str, bytes: Vec<u8>, path: Option<PathBuf>, now: f64) {
+        let ext = std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
         if ext == "lbdev" {
-            self.import_lbdev(&p, now);
+            self.import_lbdev(&String::from_utf8_lossy(&bytes), now);
+            return;
+        }
+        if ext == "csv" || ext == "txt" {
+            self.picked(Pick::VarText, name, bytes, path, now);
             return;
         }
         if ext != "lbrn2" && ext != "lbrn" && ext != "burn" && ext != "xml" {
-            self.import_path(p, now);
+            self.import_bytes(name, bytes, now);
             return;
         }
-        match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| crate::lbrn::load_str(&t)) {
+        match crate::lbrn::load_str(&String::from_utf8_lossy(&bytes)) {
             Ok(l) => {
                 if !self.doc.shapes.is_empty() || self.dirty || self.path.is_some() {
                     self.new_tab(None);
@@ -775,10 +917,15 @@ impl App {
                 self.doc = l.doc;
                 self.kept = l.kept;
                 self.doc.sync_cuts();
-                self.settings.add_recent(&p.to_string_lossy());
-                self.save_settings(now);
+                if let Some(p) = &path {
+                    self.settings.add_recent(&p.to_string_lossy());
+                    self.save_settings(now);
+                }
+                if path.is_none() {
+                    self.doc.title = std::path::Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string());
+                }
                 let n = self.doc.shapes.len();
-                self.path = Some(p);
+                self.path = path;
                 self.dirty = false;
                 self.warnings = l.warnings;
                 self.zoom_to_fit_all();
@@ -789,11 +936,53 @@ impl App {
         }
     }
 
-    pub fn import_path(&mut self, p: PathBuf, now: f64) {
-        let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    /// Add a file's contents to this project: another project, an EZCad2 file, or a picture.
+    pub fn import_bytes(&mut self, name: &str, bytes: Vec<u8>, now: f64) {
+        let ext = std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        if ext == "ezd" {
+            match crate::ezd::import(&bytes, self.settings.device.width, self.settings.device.height) {
+                Ok(imp) => {
+                    self.checkpoint();
+                    let start = self.doc.shapes.len();
+                    for (layer, pen) in &imp.pens {
+                        let c = self.doc.cut_mut(*layer);
+                        if !pen.name.is_empty() {
+                            c.name = pen.name.clone();
+                        }
+                        if pen.speed > 0.0 {
+                            c.speed = pen.speed;
+                        }
+                        if pen.power > 0.0 {
+                            c.max_power = pen.power.min(100.0);
+                        }
+                        c.passes = pen.passes.max(1);
+                        if pen.frequency > 0.0 {
+                            c.frequency = pen.frequency * 1000.0;
+                        }
+                    }
+                    for (layer, spacing, angle) in &imp.fills {
+                        let c = self.doc.cut_mut(*layer);
+                        c.mode = CutMode::Fill;
+                        if *spacing > 0.0 {
+                            c.interval = *spacing;
+                        }
+                        c.angle = *angle;
+                    }
+                    let n = imp.shapes.len();
+                    self.doc.shapes.extend(imp.shapes);
+                    self.doc.sync_cuts();
+                    self.sel = (start..self.doc.shapes.len()).collect();
+                    self.warnings.extend(imp.notes);
+                    self.touch();
+                    self.toast(format!("Imported {n} shape(s) from EZCad2, with its pens as layers"), now);
+                }
+                Err(e) => self.error(format!("Could not import this EZCad2 file: {e}"), now),
+            }
+            return;
+        }
         if ext == "lbrn2" || ext == "lbrn" {
             // merge another project
-            match std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| crate::lbrn::load_str(&t)) {
+            match crate::lbrn::load_str(&String::from_utf8_lossy(&bytes)) {
                 Ok(l) => {
                     self.checkpoint();
                     let start = self.doc.shapes.len();
@@ -810,10 +999,7 @@ impl App {
             }
             return;
         }
-        match std::fs::read(&p) {
-            Ok(bytes) => self.add_image_bytes(bytes, &p.to_string_lossy(), None, now),
-            Err(e) => self.error(format!("Could not read the file: {e}"), now),
-        }
+        self.add_image_bytes(bytes, name, None, now);
     }
 
     /// Add a picture (file contents or pasted PNG) as an image shape, at `at` or in the middle of the bed.
@@ -898,41 +1084,49 @@ impl App {
                 }
                 self.new_doc();
             }
-            Action::Open => {
-                if let Some(p) = crate::platform::FileDialog::new().add_filter("Laser projects", &["lbrn2", "lbrn"]).add_filter("LightBurn device profile", &["lbdev"]).add_filter("All files", &["*"]).pick_file() {
-                    self.open_path(p, now);
-                }
-            }
-            Action::Import => {
-                if let Some(p) = crate::platform::FileDialog::new().add_filter("Images and projects", &["png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "lbrn2", "lbrn"]).pick_file() {
-                    self.import_path(p, now);
-                }
-            }
+            Action::Open => self.pick_file(Pick::Open, "Laser projects, device profiles, EZCad2", &["lbrn2", "lbrn", "lbdev", "ezd"], now),
+            Action::Import => self.pick_file(Pick::Import, "Images, projects, EZCad2", &["png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "lbrn2", "lbrn", "ezd"], now),
             Action::Save => match self.path.clone() {
                 Some(p) if p.extension().map(|e| e == "lbrn2").unwrap_or(false) => self.save_to(p, now),
                 _ => self.run(Action::SaveAs, ctx),
             },
             Action::SaveAs => {
-                if let Some(p) = crate::platform::FileDialog::new().add_filter("LightBurn-compatible project", &["lbrn2"]).set_file_name("project.lbrn2").save_file() {
-                    self.save_to(p, now);
+                self.doc.sync_cuts();
+                let text = crate::lbrn::save_string(&self.doc, &self.kept);
+                let name = format!("{}.lbrn2", self.doc.title.clone().unwrap_or_else(|| "project".into()));
+                match self.save_file("LightBurn-compatible project", &["lbrn2"], &name, text.as_bytes()) {
+                    Ok(Some(p)) => {
+                        self.settings.add_recent(&p.to_string_lossy());
+                        self.save_settings(now);
+                        self.path = Some(p);
+                        self.dirty = false;
+                        self.toast("Saved", now);
+                    }
+                    Ok(None) => {
+                        self.dirty = false;
+                        self.toast(format!("Downloaded {name}"), now);
+                    }
+                    Err(Some(e)) => self.error(format!("Could not save: {e}"), now),
+                    Err(None) => {}
                 }
             }
             Action::ExportGcode => {
                 let job = gcode::build_job(&self.doc, &self.settings.device, None);
                 let name = self.gcode_file_name(job.seconds);
                 let ruida = self.settings.device.controller == gcode::Controller::Ruida;
-                let dialog = if ruida {
-                    // Ruida: the scrambled .rd job file, for a USB stick or RDWorks
-                    crate::platform::FileDialog::new().add_filter("Ruida job", &["rd"]).set_file_name(&name.replace(".gcode", ".rd"))
+                let k40 = self.settings.device.controller == gcode::Controller::K40Nano;
+                // Ruida: the scrambled .rd job file, for a USB stick or RDWorks; K40: an .egv file
+                let (label, exts, name, bytes): (&str, &[&str], String, Vec<u8>) = if k40 {
+                    ("K40 job (EGV)", &["egv"], name.replace(".gcode", ".egv"), crate::k40::egv_file(&crate::k40::job_egv(&job, &self.settings.device)))
+                } else if ruida {
+                    ("Ruida job", &["rd"], name.replace(".gcode", ".rd"), crate::ruida::rd_file(&job, &self.settings.device))
                 } else {
-                    crate::platform::FileDialog::new().add_filter("G-code", &["gcode", "gc", "nc"]).set_file_name(&name)
+                    ("G-code", &["gcode", "gc", "nc"], name, job.gcode.clone().into_bytes())
                 };
-                if let Some(p) = dialog.save_file() {
-                    let bytes = if ruida { crate::ruida::rd_file(&job, &self.settings.device) } else { job.gcode.clone().into_bytes() };
-                    match std::fs::write(&p, &bytes) {
-                        Ok(_) => self.toast(format!("G-code saved — about {}", fmt_time(job.seconds)), now),
-                        Err(e) => self.error(format!("Could not save G-code: {e}"), now),
-                    }
+                match self.save_file(label, exts, &name, &bytes) {
+                    Ok(_) => self.toast(format!("G-code saved — about {}", fmt_time(job.seconds)), now),
+                    Err(Some(e)) => self.error(format!("Could not save G-code: {e}"), now),
+                    Err(None) => {}
                 }
                 if self.job.as_ref().map(|j| j.skipped_outside).unwrap_or(0) == 0 && job.skipped_outside > 0 {
                     self.error(format!("{} shape(s) outside the bed were left out of the G-code.", job.skipped_outside), now);
@@ -1179,6 +1373,105 @@ impl App {
                 }
                 self.laser.send(Cmd::Send(lines));
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Action::LaserStart | Action::LaserFrame | Action::LaserStop if self.settings.device.controller == gcode::Controller::EzCad2 => {
+                use crate::galvo;
+                let busy = self.usb_job.as_ref().map(|r| r.result.lock().map(|g| g.is_none()).unwrap_or(false)).unwrap_or(false);
+                if a == Action::LaserStop {
+                    match &self.usb_job {
+                        Some(r) if busy => r.stop.store(true, std::sync::atomic::Ordering::Relaxed),
+                        _ => self.usb_job = Some(galvo::usb::stop()),
+                    }
+                    return;
+                }
+                if busy {
+                    // a running red-pointer frame stops when the next action starts
+                    if let Some(r) = &self.usb_job {
+                        r.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    self.toast("Stopping what the galvo is doing first; press again in a moment.", now);
+                    return;
+                }
+                let job = gcode::build_job(&self.doc, &self.settings.device, None);
+                if job.moves.iter().all(|m| m.power <= 0.0) {
+                    self.job = Some(job);
+                    self.error("Nothing to mark: no layer with Burn switched on has shapes inside the lens field.", now);
+                    return;
+                }
+                let s = self.settings.device.galvo.clone();
+                if a == Action::LaserFrame {
+                    let mut b = BBox::EMPTY;
+                    for m in job.moves.iter().filter(|m| m.power > 0.0) {
+                        b.add(m.from);
+                        b.add(m.to);
+                    }
+                    // about 20 seconds of tracing, or until Stop
+                    let perim = 2.0 * (b.width() + b.height());
+                    let loops = ((20.0 * s.light_speed / perim.max(1.0)) as usize).clamp(3, 2000);
+                    self.usb_job = Some(galvo::usb::run(galvo::frame_list(b, &s, loops), s, true, "Framing done".into()));
+                    self.toast("Tracing the job outline with the red pointer (Stop ends it)", now);
+                    self.job = Some(job);
+                    return;
+                }
+                let (entries, outside) = galvo::job_list(&job, &self.doc, &self.settings.device);
+                if outside > 0 || job.skipped_outside > 0 {
+                    self.error(format!("{} piece(s) outside the lens field are left out.", outside + job.skipped_outside), now);
+                }
+                self.usb_job = Some(galvo::usb::run(entries, s, false, "Galvo job finished".into()));
+                self.toast(format!("Marking — about {}", fmt_time(job.seconds)), now);
+                self.job_started = Some(now);
+                self.job_estimate = job.seconds;
+                self.job_finished_after = None;
+                self.job = Some(job);
+                self.advance_variable_text(now);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Action::LaserStart | Action::LaserFrame | Action::LaserHome | Action::LaserStop if self.settings.device.controller == gcode::Controller::K40Nano => {
+                use crate::k40;
+                if a == Action::LaserStop {
+                    match &self.usb_job {
+                        Some(r) if r.result.lock().map(|g| g.is_none()).unwrap_or(false) => r.stop.store(true, std::sync::atomic::Ordering::Relaxed),
+                        _ => self.usb_job = Some(k40::usb::command("I", "K40 stopped".into())),
+                    }
+                    return;
+                }
+                if self.usb_job.as_ref().map(|r| r.result.lock().map(|g| g.is_none()).unwrap_or(false)).unwrap_or(false) {
+                    self.error("The K40 is still busy with the last job. Press Stop to cancel it.", now);
+                    return;
+                }
+                if a == Action::LaserHome {
+                    self.usb_job = Some(k40::usb::command("IPP", "K40 homed".into()));
+                    return;
+                }
+                let job = gcode::build_job(&self.doc, &self.settings.device, None);
+                if job.moves.iter().all(|m| m.power <= 0.0) {
+                    self.job = Some(job);
+                    self.error("Nothing to burn: no layer with Burn switched on has shapes inside the bed.", now);
+                    return;
+                }
+                if a == Action::LaserFrame {
+                    let mut b = BBox::EMPTY;
+                    for m in job.moves.iter().filter(|m| m.power > 0.0) {
+                        b.add(m.from);
+                        b.add(m.to);
+                    }
+                    let data = k40::frame_egv(b, &self.settings.device);
+                    self.usb_job = Some(k40::usb::run(data, "Framing done".into(), true));
+                    self.job = Some(job);
+                    return;
+                }
+                if job.skipped_outside > 0 {
+                    self.error(format!("{} shape(s) outside the bed are left out of this job.", job.skipped_outside), now);
+                }
+                let data = k40::job_egv(&job, &self.settings.device);
+                self.usb_job = Some(k40::usb::run(data, "K40 job finished".into(), true));
+                self.toast(format!("Sending the job to the K40 — about {}. Set the power with the knob on the laser.", fmt_time(job.seconds)), now);
+                self.job_started = Some(now);
+                self.job_estimate = job.seconds;
+                self.job_finished_after = None;
+                self.job = Some(job);
+                self.advance_variable_text(now);
+            }
             Action::LaserStart if self.settings.device.controller == gcode::Controller::Ruida => {
                 let job = gcode::build_job(&self.doc, &self.settings.device, None);
                 if self.settings.device.ip.trim().is_empty() {
@@ -1190,6 +1483,7 @@ impl App {
                 self.net_job = Some(crate::ruida::send(&job, &self.settings.device, &self.settings.device.ip));
                 self.toast(format!("Sending the job to {} …", self.settings.device.ip), now);
                 self.job = Some(job);
+                self.advance_variable_text(now);
             }
             Action::LaserStart => {
                 let job = gcode::build_job(&self.doc, &self.settings.device, None);
@@ -1210,6 +1504,7 @@ impl App {
                 self.job_finished_after = None;
                 self.laser.progress = (0, job.gcode.lines().filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with(';')).count());
                 self.job = Some(job);
+                self.advance_variable_text(now);
             }
             Action::LaserPause => {
                 let paused = self.laser.state.starts_with("Hold");
@@ -1328,6 +1623,8 @@ impl App {
             Action::Settings => self.win_settings = true,
             Action::Notes => self.win_notes = !self.win_notes,
             Action::Help => self.win_help = !self.win_help,
+            Action::VariableText => self.win_vartext = !self.win_vartext,
+            Action::Camera => self.win_camera = !self.win_camera,
             Action::WelcomeTour => {
                 self.win_settings = false;
                 self.win_help = false;

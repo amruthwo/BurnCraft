@@ -358,6 +358,8 @@ pub struct TextStyle {
     pub weld: bool,
     /// Extra space between letters in mm (LightBurn `LS`).
     pub letter_spacing: f64,
+    /// Fill in placeholders (%0, {Name}, {serial}…) from the variable text data (saved as `BcVar`).
+    pub variable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -453,6 +455,7 @@ impl Shape {
             }
             ShapeKind::Text { backup, text, height, font, style } => match backup {
                 Some(b) => b.flatten(tol),
+                None if style.variable => crate::text::text_outline(&crate::vartext::resolve(text), font, *height, style, tol),
                 None => crate::text::text_outline(text, font, *height, style, tol),
             },
             ShapeKind::Bitmap { w, h, .. } => {
@@ -624,6 +627,8 @@ pub struct Document {
     pub arrays: Vec<crate::relations::ArrayLink>,
     /// Name given to the project tab (right-click → Rename); the file name is used otherwise.
     pub title: Option<String>,
+    /// Rows, serial number and settings for variable text (saved as the root attribute `BcVarText`).
+    pub vartext: crate::vartext::VarText,
 }
 
 impl Default for Document {
@@ -642,6 +647,7 @@ impl Default for Document {
             offsets: Vec::new(),
             arrays: Vec::new(),
             title: None,
+            vartext: Default::default(),
         }
     }
 }

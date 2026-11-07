@@ -22,6 +22,8 @@ pub fn all(ctx: &Context, app: &mut App, run: &mut Vec<Action>) {
     along_curve(ctx, app);
     barcode(ctx, app);
     crate::help::window(ctx, app);
+    vartext(ctx, app);
+    camera(ctx, app);
     toasts(ctx, app);
 }
 
@@ -191,10 +193,8 @@ fn settings(ctx: &Context, app: &mut App) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Laser").strong());
             if ui.button("Import LightBurn device (.lbdev)…").on_hover_text("Read the laser's name and work area from a LightBurn device profile").clicked() {
-                if let Some(p) = crate::platform::FileDialog::new().add_filter("LightBurn device", &["lbdev"]).pick_file() {
-                    let now = ui.input(|i| i.time);
-                    app.import_lbdev(&p, now);
-                }
+                let now = ui.input(|i| i.time);
+                app.pick_file(crate::app::Pick::Lbdev, "LightBurn device", &["lbdev"], now);
             }
         });
         let d = &mut app.settings.device;
@@ -206,12 +206,14 @@ fn settings(ctx: &Context, app: &mut App) {
             let before = d.controller;
             egui::ComboBox::from_id_salt("controller").selected_text(d.controller.label()).width(260.0).show_ui(ui, |ui| {
                 use crate::gcode::{Family, Support};
-                for (fam, title) in [(Family::GCode, "G-code controllers"), (Family::Dsp, "DSP controllers"), (Family::Galvo, "Galvo controllers")] {
+                for (fam, title) in [(Family::GCode, "G-code controllers"), (Family::Lihuiyu, "K40 controllers"), (Family::Dsp, "DSP controllers"), (Family::Galvo, "Galvo controllers")] {
                     ui.label(RichText::new(title).strong().size(11.5));
                     for c in crate::gcode::Controller::ALL.into_iter().filter(|c| c.family() == fam) {
                         let note = match c.support() {
                             Support::Full => "",
                             Support::FileAndNetwork => "  · .rd files + network",
+                            Support::Usb if c == crate::gcode::Controller::K40Nano => "  · USB + .egv files",
+                            Support::Usb => "  · USB (untested)",
                             Support::NotYet => "  · not yet",
                         };
                         let r = ui.add_enabled(c.support() != Support::NotYet, egui::Button::selectable(d.controller == c, format!("{}{}", c.label(), note)));
@@ -226,16 +228,124 @@ fn settings(ctx: &Context, app: &mut App) {
                 d.s_max = d.controller.default_s_max();
                 d.baud = d.controller.default_baud();
                 d.dynamic_power = d.dynamic_power && d.controller.has_dynamic();
+                // a K40's usual work area, if the size was still the general default
+                if d.controller == crate::gcode::Controller::K40Nano && d.width == crate::gcode::LBDEV_DEFAULT_WIDTH && d.height == crate::gcode::LBDEV_DEFAULT_HEIGHT {
+                    d.width = crate::k40::DEFAULT_WIDTH;
+                    d.height = crate::k40::DEFAULT_HEIGHT;
+                }
+                // a galvo's work area is its lens field
+                if d.controller == crate::gcode::Controller::EzCad2 {
+                    d.width = d.galvo.lens;
+                    d.height = d.galvo.lens;
+                }
                 save = true;
             }
             ui.end_row();
             ui.label("");
-            ui.label(RichText::new("G-code controllers: send over USB/serial or save G-code. Ruida (DSP): save .rd files or send over the network. Trocen, TopWisdom and galvo (EZCad, BSL) controllers use closed protocols that BurnCraft doesn't speak yet.").size(11.0).weak());
+            let note = match d.controller.family() {
+                crate::gcode::Family::GCode => "Send over USB/serial, or save G-code.",
+                crate::gcode::Family::Lihuiyu => "Send over USB, or save .egv files.",
+                crate::gcode::Family::Dsp => "Ruida: save .rd files or send over the network.",
+                crate::gcode::Family::Galvo => "Send over USB. Not yet tested on a real machine: start at low power.",
+            };
+            ui.label(RichText::new(note).size(11.0).weak());
             ui.end_row();
+            if d.controller == crate::gcode::Controller::EzCad2 {
+                let g = &mut d.galvo;
+                ui.label("Laser source");
+                ui.horizontal(|ui| {
+                    for s in crate::galvo::Source::ALL {
+                        save |= ui.selectable_value(&mut g.source, s, s.label()).changed();
+                    }
+                });
+                ui.end_row();
+                ui.label("Lens field");
+                if ui.add(egui::DragValue::new(&mut g.lens).range(10.0..=600.0).speed(0.5).suffix(" mm")).on_hover_text("The size marked on the lens, e.g. 110 mm; it's also the work area").changed() {
+                    d.width = g.lens;
+                    d.height = g.lens;
+                    save = true;
+                }
+                ui.end_row();
+                ui.label("Orientation");
+                ui.horizontal(|ui| {
+                    save |= ui.checkbox(&mut g.flip_x, "Flip X").changed();
+                    save |= ui.checkbox(&mut g.flip_y, "Flip Y").changed();
+                    save |= ui.checkbox(&mut g.swap_xy, "Swap X/Y").changed();
+                })
+                .response
+                .on_hover_text("If Frame traces the outline turned or mirrored, change these (the defaults suit most machines)");
+                ui.end_row();
+                ui.label("Correction file");
+                ui.horizontal(|ui| {
+                    save |= ui.add(egui::TextEdit::singleline(&mut g.cor_file).hint_text("none (.cor from the EZCad folder)").desired_width(220.0)).changed();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if ui.button("Browse…").clicked() {
+                        if let Some(p) = crate::platform::FileDialog::new().add_filter("Lens correction", &["cor"]).pick_file() {
+                            g.cor_file = p.to_string_lossy().to_string();
+                            // the file says which lens it was made for
+                            if let Ok((_, lens)) = std::fs::read(&p).map_err(|e| e.to_string()).and_then(|b| crate::galvo::read_cor(&b)) {
+                                if lens.is_finite() && (10.0..=600.0).contains(&lens) {
+                                    g.lens = (lens * 1000.0).round() / 1000.0;
+                                    d.width = g.lens;
+                                    d.height = g.lens;
+                                }
+                            }
+                            save = true;
+                        }
+                    }
+                });
+                ui.end_row();
+                ui.label("Travel speed");
+                save |= ui.add(egui::DragValue::new(&mut g.jump_speed).range(10.0..=20000.0).speed(10.0).suffix(" mm/s")).changed();
+                ui.end_row();
+                ui.label("Red pointer speed");
+                save |= ui.add(egui::DragValue::new(&mut g.light_speed).range(10.0..=20000.0).speed(10.0).suffix(" mm/s")).changed();
+                ui.end_row();
+                ui.label("Delays (µs)");
+                ui.horizontal(|ui| {
+                    save |= ui.add(egui::DragValue::new(&mut g.delay_on).range(-5000.0..=5000.0).prefix("on ")).changed();
+                    save |= ui.add(egui::DragValue::new(&mut g.delay_off).range(-5000.0..=5000.0).prefix("off ")).changed();
+                    save |= ui.add(egui::DragValue::new(&mut g.delay_polygon).range(0.0..=5000.0).prefix("corner ")).changed();
+                    save |= ui.add(egui::DragValue::new(&mut g.delay_end).range(0.0..=100000.0).prefix("end ")).changed();
+                });
+                ui.end_row();
+                ui.label("Default frequency");
+                save |= ui.add(egui::DragValue::new(&mut g.frequency).range(1.0..=4000.0).suffix(" kHz")).on_hover_text("Used for layers whose frequency is 0").changed();
+                ui.end_row();
+                if g.source == crate::galvo::Source::Fiber {
+                    ui.label("MOPA pulse width");
+                    ui.horizontal(|ui| {
+                        let mut on = g.pulse_width.is_some();
+                        if ui.checkbox(&mut on, "").on_hover_text("Only for MOPA fiber sources").changed() {
+                            g.pulse_width = if on { Some(4) } else { None };
+                            save = true;
+                        }
+                        if let Some(pw) = &mut g.pulse_width {
+                            save |= ui.add(egui::DragValue::new(pw).range(1..=500)).changed();
+                        }
+                    });
+                    ui.end_row();
+                }
+            }
+            if d.controller == crate::gcode::Controller::K40Nano {
+                ui.label("Board");
+                egui::ComboBox::from_id_salt("k40board").selected_text(d.board.as_str()).show_ui(ui, |ui| {
+                    for b in crate::k40::BOARDS {
+                        save |= ui.selectable_value(&mut d.board, b.to_string(), b).changed();
+                    }
+                })
+                .response
+                .on_hover_text("Printed on the controller board (\"LASER-M2\" → M2). Most K40s have an M2.");
+                ui.end_row();
+            }
             if d.controller == crate::gcode::Controller::Ruida {
                 ui.label("IP address");
                 save |= ui.add(egui::TextEdit::singleline(&mut d.ip).hint_text("e.g. 192.168.1.100")).on_hover_text("The address shown on the controller's panel (Ruida listens on UDP port 50200)").changed();
                 ui.end_row();
+            }
+            if d.controller == crate::gcode::Controller::EzCad2 {
+                // the work area is the lens field (set above); the G-code settings below don't apply
+                return;
             }
             ui.label("Work area");
             ui.horizontal(|ui| {
@@ -244,6 +354,9 @@ fn settings(ctx: &Context, app: &mut App) {
                 save |= ui.add(egui::DragValue::new(&mut d.height).range(10.0..=5000.0).suffix(" mm")).changed();
             });
             ui.end_row();
+            if d.controller.family() != crate::gcode::Family::GCode {
+                return;
+            }
             ui.label("Max S value");
             save |= ui.add(egui::DragValue::new(&mut d.s_max).range(1.0..=100000.0)).on_hover_text("GRBL $30 — usually 1000").changed();
             ui.end_row();
@@ -1030,3 +1143,281 @@ fn toasts(ctx: &Context, app: &mut App) {
 
 #[allow(dead_code)]
 fn _unused(_: P2) {}
+
+/// Variable text: load rows from a .csv / .txt file, pick the current row, serial numbers.
+fn vartext(ctx: &Context, app: &mut App) {
+    if !app.win_vartext {
+        return;
+    }
+    let mut open = true;
+    let mut changed = false;
+    let mut load = false;
+    let mut insert: Option<String> = None;
+    let now = ctx.input(|i| i.time);
+    egui::Window::new("Variable Text").open(&mut open).default_width(540.0).show(ctx, |ui| {
+        ui.label(RichText::new("Text shapes with \u{201c}Variable text\u{201d} ticked (in Properties) fill in their placeholders from the current row.").size(12.0));
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            load = ui.button("Load .csv / .txt…").clicked();
+            let v = &app.doc.vartext;
+            ui.label(if v.file.is_empty() { "No file loaded".to_string() } else { format!("{} · {} row(s)", v.file, v.rows.len()) });
+        });
+        let mut hh = app.doc.vartext.has_headers;
+        if ui.checkbox(&mut hh, "First row of a .csv holds the column names").changed() {
+            app.doc.vartext.set_has_headers(hh);
+            changed = true;
+        }
+        let v = &mut app.doc.vartext;
+        let n = v.rows.len();
+        ui.horizontal(|ui| {
+            ui.label("Row");
+            if ui.add_enabled(v.row > 0, egui::Button::new("Previous")).clicked() {
+                v.row -= 1;
+                changed = true;
+            }
+            let mut r = v.row + 1;
+            if ui.add_enabled(n > 0, egui::DragValue::new(&mut r).range(1..=n.max(1))).changed() {
+                v.row = r.saturating_sub(1).min(n.saturating_sub(1));
+                changed = true;
+            }
+            ui.label(format!("of {n}"));
+            if ui.add_enabled(v.row + 1 < n, egui::Button::new("Next")).clicked() {
+                v.row += 1;
+                changed = true;
+            }
+        });
+        let cols = v.columns();
+        if n > 0 {
+            let row_h = 20.0;
+            egui::ScrollArea::both().id_salt("vt_rows").max_height(180.0).auto_shrink([false, true]).show_rows(ui, row_h, n + 1, |ui, range| {
+                egui::Grid::new("vt_grid").striped(true).min_row_height(row_h).show(ui, |ui| {
+                    for r in range {
+                        if r == 0 {
+                            ui.label(RichText::new("#").strong());
+                            for c in 0..cols {
+                                let h = v.headers.get(c).cloned().unwrap_or_default();
+                                ui.label(RichText::new(if h.is_empty() { format!("%{c}") } else { format!("{h}  (%{c})") }).strong());
+                            }
+                        } else {
+                            let i = r - 1;
+                            if ui.selectable_label(v.row == i, format!("{}", i + 1)).clicked() {
+                                v.row = i;
+                                changed = true;
+                            }
+                            for c in 0..cols {
+                                let t = v.rows[i].get(c).cloned().unwrap_or_default();
+                                ui.label(if v.row == i { RichText::new(t).color(ACCENT) } else { RichText::new(t) });
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Serial number");
+            changed |= ui.add(egui::DragValue::new(&mut v.serial)).changed();
+            ui.label("step");
+            changed |= ui.add(egui::DragValue::new(&mut v.serial_step)).changed();
+            ui.label("digits");
+            changed |= ui.add(egui::DragValue::new(&mut v.serial_digits).range(0..=12)).on_hover_text("Pad with zeros, e.g. 4 → 0007").changed();
+        });
+        changed |= ui.checkbox(&mut v.advance, "Move to the next row and serial number after each job is started").changed();
+        ui.separator();
+        ui.label(RichText::new("Placeholders").strong());
+        ui.label(RichText::new("%0, %1, … a column of the current row · {Column name} · {serial} · {row} · {date} · {time} · %% for a plain %").size(11.5).weak());
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Add to the selected text:");
+            let mut chips: Vec<String> = (0..cols).map(|c| v.headers.get(c).filter(|h| !h.trim().is_empty()).map(|h| format!("{{{h}}}")).unwrap_or(format!("%{c}"))).collect();
+            chips.extend(["{serial}".to_string(), "{date}".to_string()]);
+            for c in chips {
+                if ui.small_button(&c).clicked() {
+                    insert = Some(c);
+                }
+            }
+        });
+        // preview of the selected text shape
+        let sel_text = app.sel.first().and_then(|&i| match &app.doc.shapes.get(i)?.kind {
+            ShapeKind::Text { text, style, .. } => Some((text.clone(), style.variable)),
+            _ => None,
+        });
+        match sel_text {
+            Some((t, true)) => {
+                ui.label(format!("Selected text now reads: {}", app.doc.vartext.resolve(&t)));
+            }
+            Some((_, false)) => {
+                ui.label(RichText::new("The selected text isn't variable yet; adding a placeholder ticks \u{201c}Variable text\u{201d} for it.").weak());
+            }
+            None => {
+                ui.label(RichText::new("Select a text shape to add placeholders to it.").weak());
+            }
+        }
+    });
+    if load {
+        app.pick_file(crate::app::Pick::VarText, "Rows for variable text", &["csv", "txt"], now);
+    }
+    if let Some(chip) = insert {
+        if let Some(&i) = app.sel.first() {
+            app.checkpoint();
+            if let Some(ShapeKind::Text { text, style, .. }) = app.doc.shapes.get_mut(i).map(|s| &mut s.kind) {
+                if !text.is_empty() && !text.ends_with(' ') {
+                    text.push(' ');
+                }
+                text.push_str(&chip);
+                style.variable = true;
+            }
+            changed = true;
+        }
+    }
+    if changed {
+        crate::vartext::set_current(&app.doc.vartext);
+        app.touch();
+    }
+    if !open {
+        app.win_vartext = false;
+    }
+}
+
+/// Camera: choose a source, show it on the bed, and line it up with four points.
+fn camera(ctx: &Context, app: &mut App) {
+    if !app.win_camera {
+        return;
+    }
+    let mut open = true;
+    let mut save = false;
+    let mut start: Option<String> = None;
+    let mut photo = false;
+    let now = ctx.input(|i| i.time);
+    let (bw, bh) = (app.settings.device.width, app.settings.device.height);
+    egui::Window::new("Camera").open(&mut open).default_width(580.0).show(ctx, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Source");
+            #[cfg(not(target_arch = "wasm32"))]
+            for dev in crate::camera::usb_cameras() {
+                let src = format!("usb:{dev}");
+                if ui.selectable_label(app.settings.camera.source == src, &dev).on_hover_text("USB camera").clicked() {
+                    start = Some(src);
+                }
+            }
+            if ui.button("Photo…").on_hover_text("Use a photo of the bed (taken from where the camera would be)").clicked() {
+                photo = true;
+            }
+        });
+        #[cfg(not(target_arch = "wasm32"))]
+        ui.horizontal(|ui| {
+            ui.label("Network camera");
+            ui.add(egui::TextEdit::singleline(&mut app.settings.camera.url).hint_text("http://192.168.1.50/snapshot.jpg").desired_width(280.0))
+                .on_hover_text("The address of a still picture (JPEG) from an IP camera or a phone camera app");
+            if ui.button("Connect").clicked() && !app.settings.camera.url.trim().is_empty() {
+                start = Some(format!("url:{}", app.settings.camera.url.trim()));
+            }
+        });
+        #[cfg(not(target_arch = "wasm32"))]
+        ui.horizontal(|ui| {
+            if app.camera.is_some() {
+                ui.label(RichText::new(format!("Live: {}", app.settings.camera.source.trim_start_matches("usb:").trim_start_matches("url:"))).color(ACCENT));
+                if ui.button("Stop").clicked() {
+                    app.camera = None;
+                }
+            }
+            if app.settings.camera.source.starts_with("url:") {
+                ui.label("every");
+                save |= ui.add(egui::DragValue::new(&mut app.settings.camera.interval).range(0.2..=60.0).suffix(" s")).changed();
+            }
+        });
+        if let Some(e) = &app.camera_error {
+            ui.colored_label(Color32::from_rgb(230, 90, 80), e);
+        }
+        ui.horizontal(|ui| {
+            save |= ui.checkbox(&mut app.settings.camera.show, "Show on the bed").changed();
+            ui.label("Opacity");
+            save |= ui.add(egui::Slider::new(&mut app.settings.camera.opacity, 0.1..=1.0)).changed();
+        });
+        ui.separator();
+        // the picture, with the alignment points
+        if let Some((_, tex)) = &app.camera_tex {
+            let ts = tex.size_vec2();
+            let w = ui.available_width().min(560.0);
+            let size = vec2(w, w * ts.y / ts.x.max(1.0));
+            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+            let p = ui.painter_at(rect);
+            p.image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            let at = |q: [f64; 2]| rect.min + vec2(q[0] as f32 * rect.width(), q[1] as f32 * rect.height());
+            let pts = app.settings.camera.image_pts;
+            for k in 0..4 {
+                p.line_segment([at(pts[k]), at(pts[(k + 1) % 4])], egui::Stroke::new(1.5, ACCENT));
+            }
+            for (k, q) in pts.iter().enumerate() {
+                let c = at(*q);
+                let active = app.camera_pick == Some(k);
+                p.circle_filled(c, if active { 9.0 } else { 7.0 }, if active { ACCENT } else { Color32::from_black_alpha(170) });
+                p.text(c, egui::Align2::CENTER_CENTER, format!("{}", k + 1), egui::FontId::proportional(11.0), Color32::WHITE);
+            }
+            if let (Some(k), true, Some(pos)) = (app.camera_pick, resp.clicked(), resp.interact_pointer_pos()) {
+                let f = (pos - rect.min) / rect.size();
+                app.settings.camera.image_pts[k] = [f.x.clamp(0.0, 1.0) as f64, f.y.clamp(0.0, 1.0) as f64];
+                if k == 3 {
+                    app.camera_pick = None;
+                    app.settings.camera.aligned = true;
+                } else {
+                    app.camera_pick = Some(k + 1);
+                }
+                save = true;
+            }
+        } else {
+            ui.label(RichText::new("No picture yet: choose a USB camera, connect a network camera, or load a photo.").weak());
+        }
+        let names = ["front-left", "front-right", "back-right", "back-left"];
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(if app.camera_pick.is_some() { "Cancel aligning" } else { "Align: click 4 points" }).clicked() {
+                app.camera_pick = if app.camera_pick.is_some() { None } else { Some(0) };
+            }
+            match app.camera_pick {
+                Some(k) => {
+                    ui.label(RichText::new(format!("Click point {} in the picture: the bed's {} position below", k + 1, names[k])).color(ACCENT));
+                }
+                None => {
+                    ui.label(RichText::new(if app.settings.camera.aligned { "Aligned" } else { "Not aligned yet" }).weak());
+                }
+            }
+        });
+        // where the four points are on the bed
+        let mut custom = app.settings.camera.bed_pts.is_some();
+        if ui.checkbox(&mut custom, "The points aren't the corners of the work area (e.g. marks burned at known positions)").changed() {
+            app.settings.camera.bed_pts = if custom { Some(app.settings.camera.bed(bw, bh).map(|q| [q.x, q.y])) } else { None };
+            save = true;
+        }
+        if let Some(b) = &mut app.settings.camera.bed_pts {
+            egui::Grid::new("cam_bed").num_columns(3).show(ui, |ui| {
+                for k in 0..4 {
+                    ui.label(format!("{} ({})", k + 1, names[k]));
+                    save |= ui.add(egui::DragValue::new(&mut b[k][0]).speed(0.5).prefix("X ").suffix(" mm")).changed();
+                    save |= ui.add(egui::DragValue::new(&mut b[k][1]).speed(0.5).prefix("Y ").suffix(" mm")).changed();
+                    ui.end_row();
+                }
+            });
+        }
+    });
+    if photo {
+        app.pick_file(crate::app::Pick::CameraPhoto, "Photo of the bed", &["jpg", "jpeg", "png", "bmp", "webp"], now);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(src) = start {
+        app.camera = Some(crate::camera::Capture::start(&src, app.settings.camera.interval));
+        app.camera_error = None;
+        app.camera_frame = None;
+        app.camera_tex = None;
+        app.settings.camera.source = src;
+        save = true;
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = start;
+    if save {
+        app.save_settings(now);
+    }
+    if !open {
+        app.win_camera = false;
+        app.camera_pick = None;
+    }
+}

@@ -415,7 +415,21 @@ fn properties(ui: &mut Ui, app: &mut App) {
                 ui.label("Weld letters");
                 redraw |= ui.checkbox(&mut style.weld, "").on_hover_text("Merge overlapping letters into one outline so the laser doesn't burn the overlaps twice").changed();
                 ui.end_row();
+                ui.label("Variable text");
+                ui.horizontal(|ui| {
+                    redraw |= ui
+                        .checkbox(&mut style.variable, "")
+                        .on_hover_text("Fill in %0, %1… / {Column} from a .csv or .txt row, {serial}, {date} and {time}")
+                        .changed();
+                    if ui.small_button("Rows…").on_hover_text("Load the rows and choose the current one").clicked() {
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("run_action"), crate::actions::Action::VariableText));
+                    }
+                });
+                ui.end_row();
             });
+            if style.variable {
+                ui.label(RichText::new(format!("Burns as: {}", crate::vartext::resolve(text))).size(11.0));
+            }
             if redraw {
                 *backup = None;
                 changed = true;
@@ -540,6 +554,51 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
             ui.add(egui::TextEdit::singleline(&mut dev.ip).hint_text("192.168.1.100").desired_width(130.0));
         });
         ui.label(RichText::new("Start sends the job over the network (UDP 50200). Save G-code makes an .rd file for a USB stick.").size(11.0).color(col.weak));
+        return;
+    }
+    if dev.controller == crate::gcode::Controller::EzCad2 {
+        ui.label(format!("{} galvo, {} mm lens, over USB", dev.galvo.source.label(), crate::geom::fmt_num(dev.galvo.lens)));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(r) = &app.usb_job {
+                let p = r.progress.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
+                ui.add(egui::ProgressBar::new(p).text(if p < 1.0 { format!("Sending {:.0}%", p * 100.0) } else { "Working…".to_string() }));
+            }
+            ui.horizontal(|ui| {
+                for (a, label, tip) in [
+                    (Action::LaserFrame, "Frame", "Trace the job's outline with the red pointer"),
+                    (Action::LaserStart, "Start", "Mark the job"),
+                    (Action::LaserStop, "Stop", "Stop marking or framing"),
+                ] {
+                    if ui.button(label).on_hover_text(tip).clicked() {
+                        run.push(a);
+                    }
+                }
+            });
+        }
+        ui.label(RichText::new("The work area is the lens field. Layer speed, power and frequency (Hz) are used. Set the source, lens, orientation and correction file in Settings. Not yet tested on a real machine: start at low power.").size(11.0).color(col.weak));
+        return;
+    }
+    if dev.controller == crate::gcode::Controller::K40Nano {
+        ui.label(format!("K40 with a {} board, over USB", dev.board));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(r) = &app.usb_job {
+                let p = r.progress.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
+                ui.add(egui::ProgressBar::new(p).text(if p < 1.0 { format!("Sending {:.0}%", p * 100.0) } else { "Burning…".to_string() }));
+            }
+            ui.horizontal(|ui| {
+                for (a, label) in [(Action::LaserHome, "Home"), (Action::LaserFrame, "Frame"), (Action::LaserStart, "Start"), (Action::LaserStop, "Stop")] {
+                    if ui.button(label).clicked() {
+                        run.push(a);
+                    }
+                }
+                if ui.button("Unlock rail").on_hover_text("Let the head be moved by hand").clicked() {
+                    app.usb_job = Some(crate::k40::usb::command("IS2P", "Rail unlocked: the head can be moved by hand".into()));
+                }
+            });
+        }
+        ui.label(RichText::new("Home before the first job: jobs start from the back-left corner. Set the power with the knob on the laser; layer speeds are used, layer power isn't. Save G-code makes an .egv file.").size(11.0).color(col.weak));
         return;
     }
     ui.horizontal(|ui| {

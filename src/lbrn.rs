@@ -41,7 +41,7 @@ pub fn load_str(src: &str) -> Result<Loaded, String> {
     doc.mirror_x = root.attr_bool("MirrorX").unwrap_or(false);
     doc.mirror_y = root.attr_bool("MirrorY").unwrap_or(false);
     for (k, v) in &root.attrs {
-        if !matches!(k.as_str(), "AppVersion" | "FormatVersion" | "MaterialHeight" | "MirrorX" | "MirrorY" | "BcRelations" | "BcOffsets" | "BcArrays") {
+        if !matches!(k.as_str(), "AppVersion" | "FormatVersion" | "MaterialHeight" | "MirrorX" | "MirrorY" | "BcRelations" | "BcOffsets" | "BcArrays" | "BcVarText") {
             doc.extra_root.push((k.clone(), v.clone()));
         }
     }
@@ -66,6 +66,9 @@ pub fn load_str(src: &str) -> Result<Loaded, String> {
     }
     doc.cuts.sort_by_key(|c| c.index);
     crate::relations::from_file(&mut doc, root.attr("BcRelations"), root.attr("BcOffsets"), root.attr("BcArrays"));
+    if let Some(v) = root.attr("BcVarText").and_then(|t| serde_json::from_str(t).ok()) {
+        doc.vartext = v;
+    }
     Ok(Loaded { doc, warnings, kept })
 }
 
@@ -334,7 +337,7 @@ fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Opt
                 Some(c) => TextCase::from_code(c as u8),
                 None => TextCase::from_code(f("ForceCase", 0.0) as u8),
             };
-            let style = TextStyle { case, weld: n.attr_bool("Weld").unwrap_or(false), letter_spacing: f("LS", 0.0) };
+            let style = TextStyle { case, weld: n.attr_bool("Weld").unwrap_or(false), letter_spacing: f("LS", 0.0), variable: n.attr_bool("BcVar").unwrap_or(false) };
             ShapeKind::Text { text: n.attr("Str").unwrap_or("").to_string(), font: n.attr("Font").unwrap_or("").to_string(), height: f("H", 10.0), style, backup }
         }
         "Bitmap" => {
@@ -449,6 +452,9 @@ fn shape_node(s: &Shape) -> Node {
                 .set("BcCase", style.case.code().to_string())
                 .set("Weld", if style.weld { "1" } else { "0" })
                 .set("HasBackupPath", "1");
+            if style.variable {
+                n.set("BcVar", "1");
+            }
         }
         ShapeKind::Bitmap { w, h, data, adjust } => {
             n.set("W", fmt_num(*w)).set("H", fmt_num(*h)).set("Gamma", fmt_num(adjust.gamma)).set("Contrast", fmt_num(adjust.contrast)).set("Brightness", fmt_num(adjust.brightness));
@@ -548,6 +554,12 @@ pub fn save_string(doc: &Document, kept: &[Node]) -> String {
     }
     for (k, v) in crate::relations::to_file(doc) {
         root.set(k, v);
+    }
+    let has_variable = doc.shapes.iter().any(|s| matches!(&s.kind, ShapeKind::Text { style, .. } if style.variable));
+    if has_variable || !doc.vartext.rows.is_empty() {
+        if let Ok(j) = serde_json::to_string(&doc.vartext) {
+            root.set("BcVarText", j);
+        }
     }
     for k in kept {
         root.push(k.clone());

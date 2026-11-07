@@ -55,6 +55,62 @@ mod web {
             MessageDialogResult::Yes
         }
     }
+
+    use std::cell::RefCell;
+    use wasm_bindgen::JsCast;
+
+    thread_local! {
+        /// Files chosen in the browser's picker: (what it's for, name, contents).
+        static PICKED: RefCell<Vec<(u8, String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Show the browser's file picker; the chosen file arrives later through `take_picked`.
+    pub fn request_file(purpose: u8, exts: &[&str]) {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+        let Some(input) = doc.create_element("input").ok().and_then(|e| e.dyn_into::<web_sys::HtmlInputElement>().ok()) else { return };
+        input.set_type("file");
+        input.set_accept(&exts.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(","));
+        let inp = input.clone();
+        let on_change = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
+            if let Some(file) = inp.files().and_then(|l| l.get(0)) {
+                let name = file.name();
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Ok(buf) = wasm_bindgen_futures::JsFuture::from(file.array_buffer()).await {
+                        let bytes = js_sys::Uint8Array::new(&buf).to_vec();
+                        PICKED.with(|p| p.borrow_mut().push((purpose, name, bytes)));
+                    }
+                });
+            }
+        });
+        input.set_onchange(Some(on_change.as_ref().unchecked_ref()));
+        on_change.forget();
+        input.click();
+    }
+
+    /// A file whose contents arrived some other way (dropped on the page).
+    pub fn push_picked(purpose: u8, name: String, bytes: Vec<u8>) {
+        PICKED.with(|p| p.borrow_mut().push((purpose, name, bytes)));
+    }
+
+    pub fn take_picked() -> Vec<(u8, String, Vec<u8>)> {
+        PICKED.with(|p| std::mem::take(&mut *p.borrow_mut()))
+    }
+
+    /// Hand bytes to the browser as a download.
+    pub fn download(name: &str, bytes: &[u8], mime: &str) -> Result<(), String> {
+        let parts = js_sys::Array::new();
+        parts.push(&js_sys::Uint8Array::from(bytes));
+        let opts = web_sys::BlobPropertyBag::new();
+        opts.set_type(mime);
+        let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(|_| "the browser refused the file".to_string())?;
+        let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(|_| "the browser refused the file".to_string())?;
+        let doc = web_sys::window().and_then(|w| w.document()).ok_or("no page")?;
+        let a = doc.create_element("a").ok().and_then(|e| e.dyn_into::<web_sys::HtmlAnchorElement>().ok()).ok_or("no page")?;
+        a.set_href(&url);
+        a.set_download(name);
+        a.click();
+        Ok(())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

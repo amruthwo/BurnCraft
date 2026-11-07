@@ -1,0 +1,7 @@
+# Let the logged-in user talk to USB laser controllers from BurnCraft:
+#   K40 lasers with the Lihuiyu M2 Nano board (USB 1a86:5512)
+#   galvo lasers with a JCZ / LMC (EZCad2) board (USB 9588:9899)
+# Installed by the BurnCraft packages to /usr/lib/udev/rules.d/. By hand: copy it to /etc/udev/rules.d/, then
+# run `sudo udevadm control --reload` and plug the laser in again.
+SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="5512", TAG+="uaccess", MODE="0660"
+SUBSYSTEM=="usb", ATTR{idVendor}=="9588", ATTR{idProduct}=="9899", TAG+="uaccess", MODE="0660"

@@ -56,7 +56,14 @@ with **Preview** and **Frame** at low power before burning it for real.
   feature. BurnCraft is also an MCP server: `burncraft --mcp`.
 * Lasers: GRBL and other G-code controllers over USB/serial: connect, jog, home, frame, start/pause/stop,
   console, estimated/elapsed/remaining time. Animated job preview with play and speed controls; G-code export.
-  Ruida DSP controllers: save `.rd` files or send jobs over the network. Shapes outside the bed are left out.
+  K40 lasers with the M2 Nano board over USB (home, frame, start, stop, `.egv` files; not yet tested on every
+  board). Galvo lasers with an EZCad2 / JCZ (LMC) board over USB: fiber, UV and CO2 sources, lens correction
+  files, red-pointer framing (not yet tested on a real machine). Ruida DSP controllers: save `.rd` files or send
+  jobs over the network. Shapes outside the bed are left out.
+* Variable text from `.csv` / `.txt` rows, serial numbers and the date, moving to the next row after each job.
+* Camera overlay: a USB camera (Linux), a network camera's snapshot address or a photo, lined up with four points.
+  The network camera address you type is the only place BurnCraft fetches pictures from.
+* Imports EZCad2 projects (`.ezd`): shapes, text, pictures, hatches, and pens as layers.
 * Built-in help and a replayable Welcome Tour.
 
 ## Download
@@ -70,9 +77,9 @@ Get the latest version from [Releases](https://github.com/amruthwo/BurnCraft/rel
 | macOS | ✓ | ✓ | | universal .dmg and zipped .app |
 | Web / PWA | wasm32 | | | static site (installable) |
 
-**Try it in your browser:** <https://amruthwo.github.io/BurnCraft/>. This is a preview for trying out the
-interface. The browser version can't open, save or export files, connect to a laser, or make AI outlines yet, so
-use the desktop app for real work.
+**Try it in your browser:** <https://amruthwo.github.io/BurnCraft/>. You can open projects and pictures (or drop
+them on the page), and saving or exporting downloads the file. Settings are kept in the browser. It can't connect
+to a laser, use a camera or make AI outlines, so use the desktop app for real work.
 
 The installers aren't code-signed. On **Windows**, SmartScreen may warn you: choose *More info → Run anyway*.
 On **macOS**, right-click the app and choose *Open* the first time.
@@ -101,6 +108,14 @@ burncraft --screenshot out.png
 BurnCraft is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
 License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any
 later version. See [LICENSE](LICENSE).
+
+## Credits
+
+- K40 / M2 Nano support is ported from [K40 Whisperer](https://www.scorchworks.com/K40whisperer/k40whisperer.html)
+  by Scorch (GNU GPL v2 or later; its speed-code library is MIT licensed).
+- Galvo (JCZ / LMC board) support and the EZCad2 file layout follow the open-source
+  [MeerK40t](https://github.com/meerk40t/meerk40t) project (MIT licence).
+- Their licence notices are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## Not affiliated
 

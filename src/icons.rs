@@ -15,7 +15,7 @@ pub enum Icon {
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
     Pen, Arc, Star, Trim, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
-    Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour,
+    Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera,
 }
 
 pub struct Pal {
@@ -632,6 +632,21 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             arc(0.5, 0.4, 0.12, PI, 2.4 * PI, ac);
             line(&[(0.5 + 0.12 * (0.4 * PI).cos(), 0.4 + 0.12 * (0.4 * PI).sin()), (0.5, 0.6)], ac);
             dot(0.5, 0.72, 0.035, pal.accent);
+        }
+        Icon::VarText => {
+            // a table of rows with a highlighted one, and a T
+            rs(rect_at(0.1, 0.2, 0.62, 0.85), thin);
+            for y in [0.41, 0.63] {
+                line(&[(0.1, y), (0.62, y)], thin);
+            }
+            rf(rect_at(0.12, 0.43, 0.6, 0.61), pal.soft);
+            line(&[(0.66, 0.2), (0.92, 0.2)], ac);
+            line(&[(0.79, 0.2), (0.79, 0.62)], ac);
+        }
+        Icon::Camera => {
+            closed(&[(0.12, 0.32), (0.32, 0.32), (0.4, 0.2), (0.6, 0.2), (0.68, 0.32), (0.88, 0.32), (0.88, 0.8), (0.12, 0.8)], Color32::TRANSPARENT, st);
+            circ(0.5, 0.56, 0.15, ac);
+            dot(0.78, 0.42, 0.03, pal.accent);
         }
         Icon::Tour => {
             // a signpost: pole and two arrow boards

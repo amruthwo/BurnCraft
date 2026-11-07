@@ -91,6 +91,8 @@ pub struct Settings {
     pub ribbon_compact: bool,
     /// The Welcome Tour has been seen (finished or skipped), so it doesn't start by itself again.
     pub tour_done: bool,
+    /// Camera source and alignment.
+    pub camera: crate::camera::CameraSettings,
     pub selection_cad_style: bool,
     /// Layer settings applied to layers of new projects.
     pub layer_defaults: Vec<crate::model::CutSetting>,
@@ -172,12 +174,21 @@ impl Default for Settings {
             ribbon_labels: true,
             ribbon_compact: true,
             tour_done: false,
+            camera: Default::default(),
             selection_cad_style: true,
             layer_defaults: Vec::new(),
             pinned: ["Save", "Undo", "Redo", "ToolSelect", "ToolLine", "ToolRect", "ToolEllipse", "ToolText", "TraceImage", "Preview", "LaserStart"].iter().map(|s| s.to_string()).collect(),
             ai: AiConfig::default(),
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+const WEB_KEY: &str = "burncraft.settings";
+
+#[cfg(target_arch = "wasm32")]
+fn web_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
 }
 
 pub fn config_dir() -> Option<PathBuf> {
@@ -190,12 +201,23 @@ impl Settings {
     }
 
     pub fn load() -> Settings {
-        let Some(p) = Self::path() else { return Settings::default() };
-        let Ok(text) = std::fs::read_to_string(p) else { return Settings::default() };
+        #[cfg(target_arch = "wasm32")]
+        let text = web_storage().and_then(|s| s.get_item(WEB_KEY).ok().flatten());
+        #[cfg(not(target_arch = "wasm32"))]
+        let text = Self::path().and_then(|p| std::fs::read_to_string(p).ok());
+        let Some(text) = text else { return Settings::default() };
         let Ok(v) = serde_json::from_str::<Value>(&text) else { return Settings::default() };
         Self::from_json(&v)
     }
 
+    /// In the browser, settings live in the page's local storage.
+    #[cfg(target_arch = "wasm32")]
+    pub fn save(&self) -> Result<(), String> {
+        let s = web_storage().ok_or("the browser doesn't allow saving settings (private window?)")?;
+        s.set_item(WEB_KEY, &self.to_json().to_string()).map_err(|_| "the browser's storage is full or blocked".to_string())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save(&self) -> Result<(), String> {
         let p = Self::path().ok_or("no config folder")?;
         if let Some(d) = p.parent() {
@@ -211,7 +233,7 @@ impl Settings {
             "ui_scale": self.ui_scale,
             "units": if self.units == Units::Mm { "mm" } else { "in" },
             "keymap": self.keymap.to_json(),
-            "device": { "name": d.name, "width": d.width, "height": d.height, "s_max": d.s_max, "rapid_speed": d.rapid_speed, "baud": d.baud, "port": d.port, "dynamic_power": d.dynamic_power, "controller": d.controller.id(), "ip": d.ip,
+            "device": { "name": d.name, "width": d.width, "height": d.height, "s_max": d.s_max, "rapid_speed": d.rapid_speed, "baud": d.baud, "port": d.port, "dynamic_power": d.dynamic_power, "controller": d.controller.id(), "ip": d.ip, "board": d.board, "galvo": serde_json::to_value(&d.galvo).unwrap_or(Value::Null),
                 "inner_first": d.opt.inner_first, "reduce_travel": d.opt.reduce_travel, "best_direction": d.opt.best_direction, "best_start": d.opt.best_start },
             "mcp": { "command": self.mcp.command, "args": self.mcp.args, "tool": self.mcp.tool, "instructions": self.mcp.instructions },
             "recent": self.recent,
@@ -223,6 +245,7 @@ impl Settings {
             "ribbon_labels": self.ribbon_labels,
             "ribbon_compact": self.ribbon_compact,
             "tour_done": self.tour_done,
+            "camera": serde_json::to_value(&self.camera).unwrap_or(Value::Null),
             "selection_cad_style": self.selection_cad_style,
             "layer_defaults": self.layer_defaults_xml(),
             "pinned": self.pinned,
@@ -267,6 +290,10 @@ impl Settings {
             dv.dynamic_power = b(d, "dynamic_power").unwrap_or(true);
             dv.controller = crate::gcode::Controller::from_id(&t(d, "controller").unwrap_or_default());
             dv.ip = t(d, "ip").unwrap_or_default();
+            if let Some(g) = d.get("galvo").and_then(|g| serde_json::from_value(g.clone()).ok()) {
+                dv.galvo = g;
+            }
+            dv.board = t(d, "board").filter(|b| crate::k40::BOARDS.contains(&b.as_str())).unwrap_or_else(|| "M2".into());
             dv.opt.inner_first = b(d, "inner_first").unwrap_or(dv.opt.inner_first);
             dv.opt.reduce_travel = b(d, "reduce_travel").unwrap_or(dv.opt.reduce_travel);
             dv.opt.best_direction = b(d, "best_direction").unwrap_or(dv.opt.best_direction);
@@ -289,6 +316,9 @@ impl Settings {
         s.ribbon_labels = b(v, "ribbon_labels").unwrap_or(true);
         s.ribbon_compact = b(v, "ribbon_compact").unwrap_or(s.ribbon_compact);
         s.tour_done = b(v, "tour_done").unwrap_or(s.tour_done);
+        if let Some(c) = v.get("camera").and_then(|c| serde_json::from_value(c.clone()).ok()) {
+            s.camera = c;
+        }
         s.selection_cad_style = b(v, "selection_cad_style").unwrap_or(true);
         if let Some(x) = v.get("layer_defaults").and_then(|x| x.as_str()) {
             if let Ok(root) = crate::xml::parse(x) {

@@ -824,6 +824,35 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
             y += step;
         }
     }
+    // the camera's picture of the bed, warped into place with the 4-point alignment
+    if app.settings.camera.show {
+        if let (Some((_, tex)), Some(h)) = (&app.camera_tex, crate::camera::bed_to_image(&app.settings.camera, dev.width, dev.height)) {
+            let quad = app.settings.camera.bed(dev.width, dev.height);
+            let n = 16usize;
+            let mut mesh = egui::Mesh::with_texture(tex.id());
+            let alpha = (app.settings.camera.opacity.clamp(0.05, 1.0) * 255.0) as u8;
+            let bil = |s: f64, t: f64| {
+                let a = p2(quad[0].x + (quad[1].x - quad[0].x) * s, quad[0].y + (quad[1].y - quad[0].y) * s);
+                let b = p2(quad[3].x + (quad[2].x - quad[3].x) * s, quad[3].y + (quad[2].y - quad[3].y) * s);
+                p2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
+            };
+            for j in 0..=n {
+                for i in 0..=n {
+                    let bp = bil(i as f64 / n as f64, j as f64 / n as f64);
+                    let uv = h.apply(bp);
+                    mesh.vertices.push(egui::epaint::Vertex { pos: tf.s(bp), uv: pos2(uv.x as f32, uv.y as f32), color: Color32::from_white_alpha(alpha) });
+                }
+            }
+            for j in 0..n {
+                for i in 0..n {
+                    let k = (j * (n + 1) + i) as u32;
+                    let w = (n + 1) as u32;
+                    mesh.indices.extend([k, k + 1, k + w + 1, k, k + w + 1, k + w]);
+                }
+            }
+            painter.add(egui::Shape::mesh(mesh));
+        }
+    }
     let o = tf.s(p2(0.0, 0.0));
     painter.circle_filled(o, 4.0, ACCENT);
     painter.line_segment([o, o + vec2(22.0, 0.0)], Stroke::new(2.0, Color32::from_rgb(230, 80, 80)));
