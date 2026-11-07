@@ -412,12 +412,14 @@ pub fn egv_file(data: &[u8]) -> Vec<u8> {
 // ---------------------------------------------------------------------------------------------------------
 // USB packets (nano_library.py)
 
-/// Status codes in the second byte of the board's answer.
+/// Status codes in the second byte of the board's answer (all listed, for reference).
+#[allow(dead_code)]
 pub const OK: u8 = 206;
 pub const BUFFER_FULL: u8 = 238;
 pub const CRC_ERROR: u8 = 207;
 pub const TASK_COMPLETE: u8 = 236;
 pub const TASK_COMPLETE_M3: u8 = 204;
+#[allow(dead_code)]
 pub const UNKNOWN_2: u8 = 239;
 
 /// Dallas/Maxim one-wire CRC-8 (reflected polynomial 0x8C), as the board checks each packet.
@@ -472,7 +474,7 @@ pub fn command_packet(cmd: &str) -> [u8; 34] {
     p
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(usb_lasers)]
 pub mod usb {
     use super::*;
     use nusb::transfer::{Bulk, ControlOut, ControlType, In, Out, Recipient};

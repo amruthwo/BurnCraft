@@ -113,6 +113,7 @@ impl Xform {
         }
     }
     /// Apply `self` first, then `o`.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn then(self, o: Xform) -> Xform {
         o.then_after(self)
     }

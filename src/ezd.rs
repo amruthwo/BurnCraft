@@ -103,6 +103,7 @@ fn matrix(v: &[&[u8]], i: usize) -> Xform {
 /// One laser setting ("pen").
 #[derive(Clone, Debug, Default)]
 pub struct Pen {
+    #[allow(dead_code)]
     pub color: [u8; 3],
     pub name: String,
     pub passes: u32,
@@ -124,7 +125,14 @@ enum Obj {
     Text { pen: i64, text: String, font: String, height: f64, pos: P2 },
     Image { pen: i64, bmp: Vec<u8>, pos: P2, w: f64, h: f64 },
     Group(Vec<Obj>),
-    Hatch { pen: i64, children: Vec<Obj>, line_space: f64, angle: f64, outlines: bool },
+    Hatch {
+        pen: i64,
+        children: Vec<Obj>,
+        line_space: f64,
+        angle: f64,
+        #[allow(dead_code)]
+        outlines: bool,
+    },
     Other,
 }
 

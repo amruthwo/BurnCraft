@@ -27,3 +27,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: "${{ matrix.target }}" }
       - run: cargo check --target ${{ matrix.target }}
+
+  # GitHub has no FreeBSD runners, so this checks inside a FreeBSD virtual machine (x86_64, using FreeBSD's
+  # own Rust package). arm64 and riscv64 are only built at release time: emulating them takes hours.
+  freebsd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          mem: 8192
+          copyback: false
+          prepare: pkg install -y rust
+          run: |
+            rustc --version
+            CARGO_TARGET_DIR=/root/target cargo check --locked

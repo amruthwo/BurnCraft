@@ -5,6 +5,7 @@ use crate::model::*;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 /// Points of a star (closed), first point straight up.
+#[allow(dead_code)]
 pub fn star(points: u32, outer: P2, inner_ratio: f64) -> Vec<P2> {
     let n = points.max(3) as usize;
     let mut pts: Vec<P2> = (0..n * 2)
@@ -22,9 +23,12 @@ pub fn star(points: u32, outer: P2, inner_ratio: f64) -> Vec<P2> {
 /// ellipse and every other one scaled by `ratio`. With `bulge` > 0 the tips get curve handles along the tangent,
 /// each `bulge · 0.5 · d` long (d = distance to the next tip), and the inner points get handles 0.33 of the way
 /// towards their neighbours' handles.
+#[allow(dead_code)]
 pub const STAR_DEFAULT_POINTS: u32 = 5;
+#[allow(dead_code)]
 pub const STAR_DEFAULT_RATIO: f64 = 0.4;
 pub const STAR_MAX_POINTS: u32 = 40;
+#[allow(dead_code)]
 pub const POLYGON_DEFAULT_SIDES: u32 = 6;
 pub const POLYGON_MAX_SIDES: u32 = 40;
 
@@ -457,6 +461,7 @@ fn seg_param(a: P2, b: P2, c: P2, d: P2) -> Option<f64> {
 
 /// Remove the piece of polyline `target` around `click` between its nearest crossings with `cutters`
 /// (and with itself). Returns what's left (possibly nothing).
+#[allow(dead_code)]
 pub fn trim(target: &[P2], click: P2, cutters: &[Vec<P2>]) -> Vec<Vec<P2>> {
     trim_split(target, click, cutters).0
 }

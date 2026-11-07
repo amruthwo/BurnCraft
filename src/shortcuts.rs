@@ -37,6 +37,7 @@ impl KeyId {
     pub fn from_key(k: Key) -> Option<KeyId> {
         key_index(k).map(KeyId)
     }
+    #[allow(dead_code)]
     pub fn key(self) -> Key {
         KEY_NAMES[self.0 as usize].1
     }

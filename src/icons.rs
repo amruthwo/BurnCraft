@@ -3,6 +3,7 @@
 use egui::{pos2, Color32, Painter, Pos2, Rect, Shape, Stroke, StrokeKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // a few icons are drawn but not used by any command yet
 pub enum Icon {
     New, Open, Import, Save, SaveAs, Export, Undo, Redo, Copy, Cut, Paste, Duplicate, Delete, SelectAll,
     Select, Pan, Line, Rect, Ellipse, Polygon, Text, Nodes, Measure,

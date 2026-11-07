@@ -24,11 +24,13 @@ pub struct CameraSettings {
     pub show: bool,
     /// Seconds between pictures when live (network cameras).
     pub interval: f64,
+    /// Lens bend: − for barrel (fish-eye) pictures, + for pincushion; 0 = none.
+    pub bend: f64,
 }
 
 impl Default for CameraSettings {
     fn default() -> Self {
-        CameraSettings { source: String::new(), url: String::new(), image_pts: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]], bed_pts: None, aligned: false, opacity: 0.85, show: true, interval: 1.0 }
+        CameraSettings { source: String::new(), url: String::new(), image_pts: [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]], bed_pts: None, aligned: false, opacity: 0.85, show: true, interval: 1.0, bend: 0.0 }
     }
 }
 
@@ -104,10 +106,62 @@ impl Homography {
     }
 }
 
-/// Bed point → picture position (fractions of width / height) for the current alignment.
-pub fn bed_to_image(s: &CameraSettings, bed_w: f64, bed_h: f64) -> Option<Homography> {
-    let img = s.image_pts.map(|q| p2(q[0], q[1]));
-    Homography::between(&s.bed(bed_w, bed_h), &img)
+/// Radial lens bend: where a straight-lens picture position (fractions, centred at 0.5) really is in a bent
+/// picture. `aspect` is width ÷ height, so the bend is round; `k` is the bend at the picture's corners.
+pub fn distort(p: P2, k: f64, aspect: f64) -> P2 {
+    if k == 0.0 {
+        return p;
+    }
+    let (dx, dy) = ((p.x - 0.5) * aspect, p.y - 0.5);
+    let r2 = (dx * dx + dy * dy) / (0.25 * (aspect * aspect + 1.0));
+    let f = 1.0 + k * r2;
+    p2(0.5 + (p.x - 0.5) * f, 0.5 + (p.y - 0.5) * f)
+}
+
+/// The straight-lens position of a point seen at `q` in a bent picture (inverse of `distort`).
+pub fn undistort(q: P2, k: f64, aspect: f64) -> P2 {
+    if k == 0.0 {
+        return q;
+    }
+    // along the radius (in round, aspect-scaled units): seen radius t = s · (1 + k s² / n); solve for s
+    let n = 0.25 * (aspect * aspect + 1.0);
+    let (dx, dy) = ((q.x - 0.5) * aspect, q.y - 0.5);
+    let t = (dx * dx + dy * dy).sqrt();
+    if t < 1e-12 {
+        return q;
+    }
+    let mut s = t;
+    for _ in 0..30 {
+        let f = s * (1.0 + k * s * s / n) - t;
+        let df = 1.0 + 3.0 * k * s * s / n;
+        if df.abs() < 1e-9 {
+            break;
+        }
+        s -= f / df;
+    }
+    let ratio = s / t;
+    p2(0.5 + (q.x - 0.5) * ratio, 0.5 + (q.y - 0.5) * ratio)
+}
+
+/// Bed point → picture position (fractions of width / height), with the lens bend.
+#[derive(Clone, Copy, Debug)]
+pub struct CameraMap {
+    h: Homography,
+    k: f64,
+    aspect: f64,
+}
+
+impl CameraMap {
+    pub fn apply(&self, bed: P2) -> P2 {
+        distort(self.h.apply(bed), self.k, self.aspect)
+    }
+}
+
+/// The mapping for the current alignment; `aspect` is the picture's width ÷ height.
+pub fn bed_to_image(s: &CameraSettings, bed_w: f64, bed_h: f64, aspect: f64) -> Option<CameraMap> {
+    // the clicked points are in the bent picture: straighten them before fitting the perspective
+    let img = s.image_pts.map(|q| undistort(p2(q[0], q[1]), s.bend, aspect));
+    Homography::between(&s.bed(bed_w, bed_h), &img).map(|h| CameraMap { h, k: s.bend, aspect })
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -204,7 +258,8 @@ pub fn usb_cameras() -> Vec<String> {
     }
 }
 
-/// Packed YUYV (4:2:2) → RGBA.
+/// Packed YUYV (4:2:2) → RGBA (used by the Linux USB camera reader).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn yuyv_to_rgba(src: &[u8], w: usize, h: usize) -> Vec<u8> {
     let mut out = vec![255u8; w * h * 4];
     let conv = |y: f32, u: f32, v: f32| -> [u8; 3] {
@@ -414,8 +469,27 @@ mod tests {
         assert!(px[0].abs_diff(130) <= 2 && px[4] == px[0]);
         let s = CameraSettings::default();
         assert_eq!(s.bed(300.0, 200.0)[2], p2(300.0, 200.0));
-        let h = bed_to_image(&s, 300.0, 200.0).unwrap();
+        let h = bed_to_image(&s, 300.0, 200.0, 1.5).unwrap();
         let c = h.apply(p2(150.0, 100.0));
         assert!((c.x - 0.5).abs() < 1e-9 && (c.y - 0.5).abs() < 1e-9, "default alignment: the bed fills the picture");
+    }
+
+    #[test]
+    fn lens_bend_round_trips_and_keeps_the_clicked_corners() {
+        // (a strong barrel bend shrinks the picture, so test a point that a bent picture can contain)
+        let q = p2(0.8, 0.3);
+        for k in [-0.3, 0.0, 0.25] {
+            let p = undistort(q, k, 1.6);
+            let back = distort(p, k, 1.6);
+            assert!((back.x - q.x).abs() < 1e-6 && (back.y - q.y).abs() < 1e-6, "k = {k}");
+        }
+        // the middle never moves; with barrel bend the corners are pulled in
+        assert_eq!(distort(p2(0.5, 0.5), 0.3, 1.6), p2(0.5, 0.5));
+        assert!(distort(p2(1.0, 1.0), -0.2, 1.0).x < 1.0);
+        // the bed corners still land on the clicked points after bending
+        let s = CameraSettings { bend: 0.2, image_pts: [[0.1, 0.9], [0.9, 0.92], [0.85, 0.1], [0.12, 0.08]], ..Default::default() };
+        let m = bed_to_image(&s, 300.0, 200.0, 1.333).unwrap();
+        let c = m.apply(p2(300.0, 0.0));
+        assert!((c.x - 0.9).abs() < 1e-6 && (c.y - 0.92).abs() < 1e-6);
     }
 }

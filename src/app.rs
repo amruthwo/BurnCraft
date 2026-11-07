@@ -222,8 +222,17 @@ pub struct TraceState {
 
 pub enum McpState {
     Idle,
-    Running { target: u64, rx: Receiver<Result<Vec<Vec<P2>>, String>>, started: f64 },
-    Done { target: u64, lines: Vec<Vec<P2>> },
+    Running {
+        #[allow(dead_code)]
+        target: u64,
+        rx: Receiver<Result<Vec<Vec<P2>>, String>>,
+        started: f64,
+    },
+    Done {
+        #[allow(dead_code)]
+        target: u64,
+        lines: Vec<Vec<P2>>,
+    },
     Failed(String),
 }
 
@@ -288,11 +297,14 @@ pub struct App {
     pub win_array: bool,
     pub win_offset: bool,
     pub win_search: bool,
+    #[allow(dead_code)]
     pub win_about: bool,
     pub search_text: String,
     pub search_index: usize,
     pub array: (usize, usize, f64, f64),
+    #[allow(dead_code)]
     pub offset_dist: f64,
+    #[allow(dead_code)]
     pub offset_replace: bool,
     pub canvas: crate::canvas::CanvasState,
     pub lock_aspect: bool,
@@ -346,7 +358,7 @@ pub struct App {
     pub win_vartext: bool,
     pub win_camera: bool,
     /// A job or command being sent to a K40 over USB.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(usb_lasers)]
     pub usb_job: Option<crate::k40::usb::Running>,
     /// The camera reading pictures in the background.
     #[cfg(not(target_arch = "wasm32"))]
@@ -367,11 +379,14 @@ pub enum Pick {
     VarText = 3,
     CameraPhoto = 4,
     Lbdev = 5,
+    Shortcuts = 6,
 }
 
 impl Pick {
+    /// (used when the browser hands a picked file over)
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn from_u8(v: u8) -> Option<Pick> {
-        [Pick::Open, Pick::Import, Pick::VarText, Pick::CameraPhoto, Pick::Lbdev].into_iter().find(|p| *p as u8 == v)
+        [Pick::Open, Pick::Import, Pick::VarText, Pick::CameraPhoto, Pick::Lbdev, Pick::Shortcuts].into_iter().find(|p| *p as u8 == v)
     }
 }
 
@@ -468,7 +483,7 @@ impl App {
             offset_opts: Default::default(),
             win_vartext: false,
             win_camera: false,
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(usb_lasers)]
             usb_job: None,
             #[cfg(not(target_arch = "wasm32"))]
             camera: None,
@@ -557,11 +572,11 @@ impl App {
             Action::Redo => !self.redo.is_empty(),
             Action::TraceImage | Action::TraceMcp | Action::ImageInvert | Action::ImageReset => self.selected_bitmap().is_some(),
             // the K40 is opened over USB for each job, so there's nothing to connect first (no pause on its board)
-            Action::LaserHome | Action::LaserStop if self.settings.device.controller == gcode::Controller::K40Nano => !cfg!(target_arch = "wasm32"),
+            Action::LaserHome | Action::LaserStop if self.settings.device.controller == gcode::Controller::K40Nano => cfg!(usb_lasers),
             Action::LaserPause if self.settings.device.controller == gcode::Controller::K40Nano => false,
             // galvo: no homing, pause or job file; Stop always reaches the board
             Action::LaserHome | Action::LaserPause | Action::ExportGcode if self.settings.device.controller == gcode::Controller::EzCad2 => false,
-            Action::LaserStop if self.settings.device.controller == gcode::Controller::EzCad2 => !cfg!(target_arch = "wasm32"),
+            Action::LaserStop if self.settings.device.controller == gcode::Controller::EzCad2 => cfg!(usb_lasers),
             Action::LaserHome | Action::LaserPause | Action::LaserStop => self.laser.connected,
             Action::LaserStart | Action::LaserFrame => !self.doc.shapes.is_empty(),
             Action::Preview | Action::ExportGcode | Action::PreviewPlay => !self.doc.shapes.is_empty(),
@@ -834,6 +849,14 @@ impl App {
             Pick::Open => self.open_bytes(name, bytes, path, now),
             Pick::Import => self.import_bytes(name, bytes, now),
             Pick::Lbdev => self.import_lbdev(&String::from_utf8_lossy(&bytes), now),
+            Pick::Shortcuts => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(v) => {
+                    self.settings.keymap = crate::shortcuts::Keymap::from_json(&v);
+                    self.save_settings(now);
+                    self.toast("Shortcuts imported", now);
+                }
+                Err(e) => self.error(format!("That isn't a shortcuts file: {e}"), now),
+            },
             Pick::VarText => {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 let short = std::path::Path::new(name).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
@@ -1355,8 +1378,9 @@ impl App {
                     }
                 }
             }
-            Action::LaserHome => self.laser.send(Cmd::Send(vec!["$H".into()])),
-            Action::LaserFrame => {
+            // (K40 and galvo lasers have their own Home and Frame further down)
+            Action::LaserHome if !self.settings.device.controller.is_usb_laser() => self.laser.send(Cmd::Send(vec!["$H".into()])),
+            Action::LaserFrame if !self.settings.device.controller.is_usb_laser() => {
                 let b = self.doc.bbox();
                 if b.is_empty() {
                     return;
@@ -1373,7 +1397,12 @@ impl App {
                 }
                 self.laser.send(Cmd::Send(lines));
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(usb_lasers))]
+            Action::LaserStart | Action::LaserFrame | Action::LaserHome | Action::LaserStop if matches!(self.settings.device.controller, gcode::Controller::EzCad2 | gcode::Controller::K40Nano) => {
+                let why = if cfg!(target_arch = "wasm32") { "in the browser" } else { "on this system yet" };
+                self.error(format!("USB lasers (K40, galvo) aren't supported {why}. Save G-code still makes a job file for the K40 (.egv)."), now);
+            }
+            #[cfg(usb_lasers)]
             Action::LaserStart | Action::LaserFrame | Action::LaserStop if self.settings.device.controller == gcode::Controller::EzCad2 => {
                 use crate::galvo;
                 let busy = self.usb_job.as_ref().map(|r| r.result.lock().map(|g| g.is_none()).unwrap_or(false)).unwrap_or(false);
@@ -1425,7 +1454,7 @@ impl App {
                 self.job = Some(job);
                 self.advance_variable_text(now);
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(usb_lasers)]
             Action::LaserStart | Action::LaserFrame | Action::LaserHome | Action::LaserStop if self.settings.device.controller == gcode::Controller::K40Nano => {
                 use crate::k40;
                 if a == Action::LaserStop {
@@ -1472,6 +1501,8 @@ impl App {
                 self.job = Some(job);
                 self.advance_variable_text(now);
             }
+            // galvo Home (switched off: a galvo has nothing to home)
+            Action::LaserHome | Action::LaserFrame => {}
             Action::LaserStart if self.settings.device.controller == gcode::Controller::Ruida => {
                 let job = gcode::build_job(&self.doc, &self.settings.device, None);
                 if self.settings.device.ip.trim().is_empty() {

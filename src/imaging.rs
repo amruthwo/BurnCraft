@@ -247,6 +247,7 @@ pub fn pixels_to_shape_space(lines: Vec<Vec<P2>>, shape_w: f64, shape_h: f64, im
 }
 
 /// Trace a bitmap shape; returns outlines in its parent space.
+#[allow(dead_code)]
 pub fn trace_shape(shape: &Shape, p: &TraceParams) -> Vec<Vec<P2>> {
     let ShapeKind::Bitmap { w, h, data, adjust } = &shape.kind else { return Vec::new() };
     let gray = adjusted_gray(data, adjust);

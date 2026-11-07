@@ -1,4 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// builds without USB lasers (the browser, FreeBSD) leave out desktop-only features (USB lasers; in the browser
+// also serial, camera capture, AI and MCP), so code only those use would otherwise be reported as unused there
+#![cfg_attr(not(usb_lasers), allow(dead_code, unused_imports, unused_mut))]
 
 mod actions;
 mod app;
@@ -370,8 +373,8 @@ impl eframe::App for Root {
         tour::show(&ctx, app);
 
         if let Some(a) = ctx.data_mut(|d| {
-            let a = d.get_temp::<actions::Action>(egui::Id::new("run_action"));
-            d.remove::<actions::Action>(egui::Id::new("run_action"));
+            let a = d.get_temp::<actions::Action>(egui::Id::unique("run_action"));
+            d.remove::<actions::Action>(egui::Id::unique("run_action"));
             a
         }) {
             run.push(a);
@@ -393,7 +396,7 @@ impl eframe::App for Root {
         } else if !app.preview_on {
             app.preview_playing = false;
         }
-        if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::new("load_demo"))).unwrap_or(false) {
+        if ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("load_demo"))).unwrap_or(false) {
             app.new_doc();
             app.doc = app::demo_document(&app.settings.device);
             app.dirty = true;
@@ -411,8 +414,8 @@ impl eframe::App for Root {
         } else if app.net_job.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
-        // a K40 job or command finished?
-        #[cfg(not(target_arch = "wasm32"))]
+        // a K40 / galvo job or command finished?
+        #[cfg(usb_lasers)]
         {
             let done = app.usb_job.as_ref().and_then(|r| r.result.lock().ok().and_then(|mut g| g.take()));
             if let Some(r) = done {

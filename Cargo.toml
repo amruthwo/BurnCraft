@@ -1,6 +1,6 @@
 [package]
 name = "burncraft"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "BurnCraft: an open-source laser design and control app (LightBurn-compatible projects)"
 readme = "README.md"
@@ -37,9 +37,12 @@ arboard = { version = "3", default-features = false, features = ["image-data", "
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 serialport = { version = "4.10", default-features = false }
-# K40 M2 Nano boards over USB (pure Rust, no libusb).
-nusb = "0.2"
 ureq = { version = "3", features = ["json"] }
+
+# K40 M2 Nano and galvo (JCZ/LMC) boards over USB (pure Rust, no libusb). nusb has no FreeBSD backend, so
+# USB lasers are built where it does (build.rs sets `usb_lasers` for the same systems).
+[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "windows", target_os = "macos"))'.dependencies]
+nusb = "0.2"
 
 # Linux: USB cameras through V4L2.
 [target.'cfg(target_os = "linux")'.dependencies]

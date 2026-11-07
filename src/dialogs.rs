@@ -5,7 +5,7 @@ use crate::app::{App, McpState};
 use crate::geom::*;
 use crate::model::*;
 use crate::settings::{Theme, Units};
-use crate::shortcuts::{Chord, Keymap, Preset};
+use crate::shortcuts::{Chord, Preset};
 use crate::theme::{self, ACCENT};
 use egui::{vec2, Color32, Context, RichText};
 
@@ -50,18 +50,18 @@ fn shortcuts(ctx: &Context, app: &mut App) {
                 app.settings.keymap.overrides.clear();
                 let _ = app.settings.save();
             }
+            let now = ui.input(|i| i.time);
             if ui.button("Export…").clicked() {
-                if let Some(p) = crate::platform::FileDialog::new().add_filter("Shortcuts", &["json"]).set_file_name("burncraft-shortcuts.json").save_file() {
-                    let _ = std::fs::write(p, serde_json::to_string_pretty(&app.settings.keymap.to_json()).unwrap());
+                // a save dialog on desktop, a download in the browser
+                let json = serde_json::to_string_pretty(&app.settings.keymap.to_json()).unwrap();
+                match app.save_file("Shortcuts", &["json"], "burncraft-shortcuts.json", json.as_bytes()) {
+                    Ok(_) => app.toast("Shortcuts exported", now),
+                    Err(Some(e)) => app.error(format!("Could not export shortcuts: {e}"), now),
+                    Err(None) => {}
                 }
             }
             if ui.button("Import…").clicked() {
-                if let Some(p) = crate::platform::FileDialog::new().add_filter("Shortcuts", &["json"]).pick_file() {
-                    if let Ok(v) = std::fs::read_to_string(p).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str(&t).map_err(|e| e.to_string())) {
-                        app.settings.keymap = Keymap::from_json(&v);
-                        let _ = app.settings.save();
-                    }
-                }
+                app.pick_file(crate::app::Pick::Shortcuts, "Shortcuts", &["json"], now);
             }
         });
         if let Some(a) = app.capture_for {
@@ -300,6 +300,14 @@ fn settings(ctx: &Context, app: &mut App) {
                 ui.end_row();
                 ui.label("Red pointer speed");
                 save |= ui.add(egui::DragValue::new(&mut g.light_speed).range(10.0..=20000.0).speed(10.0).suffix(" mm/s")).changed();
+                ui.end_row();
+                ui.label("Red pointer offset");
+                ui.horizontal(|ui| {
+                    save |= ui.add(egui::DragValue::new(&mut g.light_offset_x).range(-20.0..=20.0).speed(0.05).prefix("X ").suffix(" mm")).changed();
+                    save |= ui.add(egui::DragValue::new(&mut g.light_offset_y).range(-20.0..=20.0).speed(0.05).prefix("Y ").suffix(" mm")).changed();
+                })
+                .response
+                .on_hover_text("If the framed outline sits beside a test mark, enter how far it needs to move");
                 ui.end_row();
                 ui.label("Delays (µs)");
                 ui.horizontal(|ui| {
@@ -700,7 +708,7 @@ fn search(ctx: &Context, app: &mut App, run: &mut Vec<Action>) {
     hits.sort_by_key(|a| !a.label().to_lowercase().starts_with(&q));
     let screen = ctx.content_rect();
     let mut close = false;
-    egui::Area::new(egui::Id::new("cmd_search")).fixed_pos(egui::pos2(screen.center().x - 220.0, screen.top() + 110.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("cmd_search")).fixed_pos(egui::pos2(screen.center().x - 220.0, screen.top() + 110.0)).order(egui::Order::Foreground).show(ctx, |ui| {
         let col = theme::colors(ui.visuals().dark_mode);
         egui::Frame::popup(ui.style()).fill(col.panel).inner_margin(10.0).show(ui, |ui| {
             ui.set_width(440.0);
@@ -1130,7 +1138,7 @@ fn toasts(ctx: &Context, app: &mut App) {
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(250));
     let screen = ctx.content_rect();
-    egui::Area::new(egui::Id::new("toasts")).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -70.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("toasts")).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -70.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
         let _ = screen;
         for t in &app.toasts {
             let col = theme::colors(ui.visuals().dark_mode);
@@ -1333,6 +1341,13 @@ fn camera(ctx: &Context, app: &mut App) {
             save |= ui.checkbox(&mut app.settings.camera.show, "Show on the bed").changed();
             ui.label("Opacity");
             save |= ui.add(egui::Slider::new(&mut app.settings.camera.opacity, 0.1..=1.0)).changed();
+        });
+        ui.horizontal(|ui| {
+            ui.label("Lens bend");
+            save |= ui
+                .add(egui::Slider::new(&mut app.settings.camera.bend, -0.5..=0.5).step_by(0.01))
+                .on_hover_text("Straighten a fish-eye (barrel) picture: lower it below 0 until the bed's straight edges look straight on the canvas; raise it above 0 for pincushion")
+                .changed();
         });
         ui.separator();
         // the picture, with the alignment points

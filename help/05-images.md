@@ -30,7 +30,7 @@
 2. Press **Align: click 4 points** and click the four corners of the work area in the picture: front-left, front-right, back-right, back-left. If the corners can't be seen, burn four marks at known positions, tick **The points aren't the corners**, and type their positions.
 3. **Show on the bed** and **Opacity** control the overlay. The alignment is saved for next time.
 
-The picture is straightened with a perspective correction; strong lens distortion (fish-eye) isn't corrected yet.
+The picture is straightened with a perspective correction. For a fish-eye camera, lower **Lens bend** below 0 until the bed's straight edges look straight on the canvas (raise it above 0 for the opposite, pincushion, bend), then align the four points again.
 
 ## Variable text
 

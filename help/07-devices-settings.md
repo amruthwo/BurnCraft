@@ -8,6 +8,8 @@ Open **Settings** (gear icon, top right):
 - **Work area**, **Max S value** (GRBL $30, usually 1000; Marlin 255), travel speed and dynamic power (M4).
 - **Import LightBurn device (.lbdev)**: reads the laser's name, work area and controller from a LightBurn device profile. Opening or dropping an .lbdev file does the same.
 
+**FreeBSD:** everything works except USB lasers (K40 and galvo), which aren't supported there yet. GRBL over serial, Ruida over the network, and saving G-code or K40 .egv files all work.
+
 ## K40 lasers (M2 Nano board)
 
 Choose **K40 (Lihuiyu M2 Nano)** as the controller and pick your **Board** (printed on the board, usually M2). The work area switches to the K40's usual 325 × 220 mm.
@@ -30,7 +32,7 @@ Choose **EZCad2 / JCZ** as the controller for fiber, UV and CO2 galvo markers wi
 - **Lens field**: the size marked on the lens (e.g. 110 mm). The work area becomes that square, with the field's middle in the middle.
 - **Correction file**: pick the machine's `.cor` file from its EZCad folder (it corrects the lens's distortion). The lens field is read from the file too.
 - **Orientation**: if Frame traces the outline turned or mirrored, change Flip X, Flip Y or Swap X/Y.
-- **Frame** traces the job's outline with the red pointer for about 20 seconds (Stop ends it sooner). **Start** marks the job. **Stop** stops at once.
+- **Frame** traces the job's outline with the red pointer for about 20 seconds (Stop ends it sooner). If the pointer doesn't land where the laser marks, mark a small test square, frame it, and enter the difference as the **Red pointer offset**. **Start** marks the job. **Stop** stops at once.
 - Each layer's **speed**, **power** and **frequency** (in Hz, e.g. 30000 for 30 kHz) are used. Travel speed, laser on/off/corner delays and MOPA pulse width are in Settings.
 - **Windows**: install the WinUSB driver for the board once, with Zadig. **Linux**: the packages allow your user to use it (tarball users copy `70-burncraft-k40.rules` as described for the K40).
 

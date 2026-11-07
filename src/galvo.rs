@@ -122,6 +122,9 @@ pub struct GalvoSettings {
     pub pulse_width: Option<u16>,
     /// Lens correction file (.cor) from the machine's EZCad folder; empty = none.
     pub cor_file: String,
+    /// Where the red pointer lands compared with the laser (mm): framing is shifted by this much.
+    pub light_offset_x: f64,
+    pub light_offset_y: f64,
 }
 
 impl Default for GalvoSettings {
@@ -143,6 +146,8 @@ impl Default for GalvoSettings {
             fpk: 10.0,
             pulse_width: None,
             cor_file: String::new(),
+            light_offset_x: 0.0,
+            light_offset_y: 0.0,
         }
     }
 }
@@ -344,7 +349,9 @@ pub fn job_list(job: &Job, doc: &Document, dev: &Device) -> (Vec<[u16; 6]>, usiz
 pub fn frame_list(bb: BBox, s: &GalvoSettings, loops: usize) -> Vec<[u16; 6]> {
     let mut b = ListBuilder::new(s, PORT_LIGHT);
     b.start(s.light_speed);
-    let c = [p2(bb.min.x, bb.min.y), p2(bb.max.x, bb.min.y), p2(bb.max.x, bb.max.y), p2(bb.min.x, bb.max.y)];
+    // shifted so the red pointer traces where the laser will mark
+    let (ox, oy) = (s.light_offset_x, s.light_offset_y);
+    let c = [p2(bb.min.x + ox, bb.min.y + oy), p2(bb.max.x + ox, bb.min.y + oy), p2(bb.max.x + ox, bb.max.y + oy), p2(bb.min.x + ox, bb.max.y + oy)];
     let pts: Vec<(u16, u16)> = c.iter().filter_map(|p| s.to_galvo(*p)).collect();
     if pts.len() == 4 {
         for _ in 0..loops {
@@ -418,7 +425,7 @@ pub fn read_cor(bytes: &[u8]) -> Result<(Vec<(u16, u16)>, f64), String> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(usb_lasers)]
 pub mod usb {
     use super::*;
     use crate::k40::usb::Running;
@@ -678,6 +685,11 @@ mod tests {
         assert!(f.iter().any(|e| e[0] == LIST_WRITE_PORT && e[1] == PORT_LIGHT));
         assert!(f.iter().all(|e| e[0] != LIST_MARK_TO));
         assert_eq!(f.iter().filter(|e| e[0] == LIST_JUMP_TO).count(), 13);
+        // the pointer offset shifts the frame
+        let shifted = GalvoSettings { light_offset_x: 5.0, ..dev.galvo.clone() };
+        let g = frame_list(BBox { min: p2(40.0, 50.0), max: p2(70.0, 60.0) }, &shifted, 1);
+        let first = |l: &[[u16; 6]]| *l.iter().find(|e| e[0] == LIST_JUMP_TO).unwrap();
+        assert_eq!(first(&g)[2], shifted.to_galvo(p2(45.0, 50.0)).unwrap().1);
     }
 
     #[test]

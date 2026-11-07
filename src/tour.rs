@@ -94,6 +94,7 @@ const STEPS: &[Step] = &[
     },
 ];
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn steps() -> usize {
     STEPS.len()
 }
@@ -138,7 +139,7 @@ pub fn show(ctx: &Context, app: &mut App) {
     // dim everything except the highlighted part, and catch clicks so the app underneath stays still
     let dark = ctx.global_style().visuals.dark_mode;
     let col = theme::colors(dark);
-    egui::Area::new(Id::new("tour_dim")).order(Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
+    egui::Area::new(Id::unique("tour_dim")).order(Order::Foreground).fixed_pos(screen.min).show(ctx, |ui| {
         ui.allocate_rect(screen, Sense::click_and_drag());
         let shade = Color32::from_black_alpha(if dark { 150 } else { 110 });
         let p = ui.painter();
@@ -180,7 +181,7 @@ pub fn show(ctx: &Context, app: &mut App) {
         Some(t) => (t.center(), Align2::CENTER_CENTER),
         None => (screen.center(), Align2::CENTER_CENTER),
     };
-    egui::Area::new(Id::new("tour_card")).order(Order::Tooltip).fixed_pos(anchor).pivot(pivot).constrain(true).show(ctx, |ui| {
+    egui::Area::new(Id::unique("tour_card")).order(Order::Tooltip).fixed_pos(anchor).pivot(pivot).constrain(true).show(ctx, |ui| {
         egui::Frame::NONE.fill(col.panel).stroke(Stroke::new(1.5, ACCENT)).corner_radius(12.0).inner_margin(16.0).shadow(ui.visuals().popup_shadow).show(ui, |ui| {
             ui.set_width(W - 32.0);
             ui.horizontal(|ui| {

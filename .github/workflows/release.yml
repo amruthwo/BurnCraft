@@ -168,9 +168,30 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: web, path: dist/burncraft-web.zip }
 
+  # FreeBSD x86_64, built inside a FreeBSD virtual machine (GitHub has no FreeBSD runners) with FreeBSD's own
+  # Rust package. Building outside the checkout keeps the VM from copying target/ back.
+  freebsd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          mem: 8192
+          copyback: true
+          prepare: pkg install -y rust
+          run: |
+            rustc --version
+            CARGO_TARGET_DIR=/root/target cargo build --release --locked
+            mkdir -p dist
+            tar -C /root/target/release -czf dist/burncraft-freebsd-x86_64.tar.gz burncraft
+      - uses: actions/upload-artifact@v4
+        with: { name: freebsd-x86_64, path: dist/*.tar.gz }
+
   # Publishes whatever was built, even if some jobs failed (missing files can be uploaded by hand).
   release:
-    needs: [linux, flatpak, windows, macos, web]
+    needs: [linux, flatpak, freebsd, windows, macos, web]
     if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
     steps:
@@ -179,3 +200,40 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
+
+  # FreeBSD arm64 and riscv64 run in an emulated virtual machine, which takes from an hour to several hours.
+  # They start after the release is published and add their files to it when they finish, so they can never
+  # hold up or break a release.
+  freebsd-emulated:
+    needs: release
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: aarch64, name: arm64, sync: rsync }
+          # the VM action only supports scp syncing for riscv64
+          - { arch: riscv64, name: riscv64, sync: scp }
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          arch: ${{ matrix.arch }}
+          sync: ${{ matrix.sync }}
+          usesh: true
+          mem: 8192
+          copyback: true
+          prepare: pkg install -y rust
+          run: |
+            rustc --version
+            CARGO_TARGET_DIR=/root/target cargo build --release --locked
+            mkdir -p dist
+            tar -C /root/target/release -czf dist/burncraft-freebsd-${{ matrix.name }}.tar.gz burncraft
+      - uses: actions/upload-artifact@v4
+        with: { name: "freebsd-${{ matrix.name }}", path: dist/*.tar.gz }
+      - name: Add to the GitHub release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release upload "${{ github.ref_name }}" dist/*.tar.gz --clobber --repo "${{ github.repository }}"

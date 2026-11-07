@@ -80,6 +80,10 @@ impl Controller {
             _ => Family::GCode,
         }
     }
+    /// Driven over its own USB protocol (K40 M2 Nano, galvo) rather than G-code or the network.
+    pub fn is_usb_laser(self) -> bool {
+        matches!(self, Controller::K40Nano | Controller::EzCad2)
+    }
     pub fn support(self) -> Support {
         match self {
             Controller::Ruida => Support::FileAndNetwork,

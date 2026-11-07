@@ -109,6 +109,13 @@ mod web {
         a.set_href(&url);
         a.set_download(name);
         a.click();
+        // free the temporary address once the download has had time to start
+        let revoke = wasm_bindgen::closure::Closure::once_into_js(move || {
+            let _ = web_sys::Url::revoke_object_url(&url);
+        });
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 30_000);
+        }
         Ok(())
     }
 }

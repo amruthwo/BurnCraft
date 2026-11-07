@@ -11,6 +11,7 @@ pub const SELECT: Color32 = Color32::from_rgb(64, 156, 255);
 
 #[derive(Clone, Copy)]
 pub struct Colors {
+    #[allow(dead_code)]
     pub bg: Color32,
     pub panel: Color32,
     pub ribbon: Color32,

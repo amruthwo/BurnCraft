@@ -194,7 +194,7 @@ fn quick_bar(ui: &mut Ui, app: &mut App, row_y: f32, left_end: f32, right_start:
     let full = ui.max_rect();
     let cx = full.center().x.clamp(left_end + bar_w / 2.0 + 8.0, (right_start - bar_w / 2.0 - 8.0).max(left_end + bar_w / 2.0 + 8.0));
     let bar = Rect::from_center_size(pos2(cx, row_y), vec2(bar_w, 30.0));
-    let bar_resp = ui.interact(bar, Id::new("quick_bar"), Sense::hover());
+    let bar_resp = ui.interact(bar, Id::unique("quick_bar"), Sense::hover());
     let hovering_drop = bar_resp.dnd_hover_payload::<PinPayload>().is_some();
     ui.painter().rect_filled(bar, 8.0, if hovering_drop { c.accent_soft } else { c.panel });
     if dragging {
@@ -206,7 +206,7 @@ fn quick_bar(ui: &mut Ui, app: &mut App, row_y: f32, left_end: f32, right_start:
     let x0 = bar.center().x - (slots as f32 * slot) / 2.0;
     for (i, a) in pinned.iter().take(shown).enumerate() {
         let r = Rect::from_min_size(pos2(x0 + i as f32 * slot, bar.top()), vec2(slot, 30.0)).shrink(2.0);
-        let resp = ui.interact(r, Id::new(("pin", i)), Sense::click_and_drag());
+        let resp = ui.interact(r, Id::unique(("pin", i)), Sense::click_and_drag());
         let enabled = app.enabled(*a);
         if resp.hovered() && enabled {
             ui.painter().rect_filled(r, 5.0, c.hover);
@@ -230,12 +230,12 @@ fn quick_bar(ui: &mut Ui, app: &mut App, row_y: f32, left_end: f32, right_start:
     // overflow: everything past the visible slots, shown while pointing at »
     if overflow {
         let r = Rect::from_min_size(pos2(x0 + shown as f32 * slot, bar.top()), vec2(slot, 30.0)).shrink(2.0);
-        let resp = ui.interact(r, Id::new("pin_more"), Sense::hover());
+        let resp = ui.interact(r, Id::unique("pin_more"), Sense::hover());
         ui.painter().text(r.center(), Align2::CENTER_CENTER, "»", FontId::proportional(16.0), c.text);
-        let open_id = Id::new("pin_more_open");
+        let open_id = Id::unique("pin_more_open");
         let mut open = ctx.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false) || resp.hovered();
         if open {
-            let area = egui::Area::new(Id::new("pin_more_area")).fixed_pos(pos2(r.left() - 80.0, r.bottom() + 2.0)).order(egui::Order::Foreground).show(&ctx, |ui| {
+            let area = egui::Area::new(Id::unique("pin_more_area")).fixed_pos(pos2(r.left() - 80.0, r.bottom() + 2.0)).order(egui::Order::Foreground).show(&ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     for a in pinned.iter().skip(shown) {
                         ui.horizontal(|ui| {
@@ -567,7 +567,7 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
                 ui.separator();
                 let has_sel = app.image_sel.is_some();
                 if ui.add_enabled(has_sel, egui::Button::new("Selection to Outline")).clicked() {
-                    ui.ctx().data_mut(|d| d.insert_temp(Id::new("run_action"), Action::SelectionToPath));
+                    ui.ctx().data_mut(|d| d.insert_temp(Id::unique("run_action"), Action::SelectionToPath));
                 }
                 if ui.add_enabled(has_sel, egui::Button::new("Clear")).clicked() {
                     app.image_sel = None;
@@ -576,7 +576,7 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
             Tool::Nodes => {
                 for a in [Action::NodeSmooth, Action::NodeCorner, Action::NodeLine, Action::NodeCurve, Action::NodeInsert, Action::NodeBreak, Action::Delete] {
                     if small_icon_button(ui, app, a, 16.0) {
-                        ui.ctx().data_mut(|d| d.insert_temp(Id::new("run_action"), a));
+                        ui.ctx().data_mut(|d| d.insert_temp(Id::unique("run_action"), a));
                     }
                 }
                 ui.label(egui::RichText::new(format!("{} selected · Shift-click adds · Alt-drag lasso · scroll over a point to grow", app.canvas.nodes.len())).color(c.weak).size(11.0));
@@ -671,7 +671,7 @@ pub fn icon_label(ui: &mut Ui, icon: Icon, text: &str) {
 
 /// The BurnCraft ant icon (packaging/icons), loaded once as a texture.
 pub fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
-    let id = Id::new("burncraft_logo");
+    let id = Id::unique("burncraft_logo");
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return t;
     }

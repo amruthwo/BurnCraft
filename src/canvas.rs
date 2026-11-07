@@ -495,8 +495,6 @@ fn trim_candidate(app: &App, w: P2, zoom: f64) -> Option<(usize, usize, Vec<Vec<
 
 pub fn canvas_ui(app: &mut App, ui: &mut Ui) -> Vec<Action> {
     let mut run = Vec::new();
-    let dark = ui.visuals().dark_mode;
-    let col = theme::colors(dark);
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
     app.canvas.rect = Some(rect);
     let ctx = ui.ctx().clone();
@@ -540,7 +538,7 @@ pub fn canvas_ui(app: &mut App, ui: &mut Ui) -> Vec<Action> {
                     let near = app.canvas.nodes.iter().any(|v| pd.verts.get(*v).map(|vt| tf.s(s.xform.apply(vt.p)).distance(hp) < 14.0).unwrap_or(false));
                     if near {
                         let acc = ui.ctx().data_mut(|d| {
-                            let a = d.get_temp_mut_or_default::<f32>(egui::Id::new("node_grow"));
+                            let a = d.get_temp_mut_or_default::<f32>(egui::Id::unique("node_grow"));
                             *a += scroll.y;
                             let v = *a;
                             if v.abs() > 40.0 {
@@ -774,7 +772,7 @@ pub fn canvas_ui(app: &mut App, ui: &mut Ui) -> Vec<Action> {
 
     if app.doc.shapes.is_empty() && app.screenshot.is_none() && !app.welcome_off {
         welcome(ui, app, rect, &mut run);
-        if ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::new("hide_welcome"))).unwrap_or(false) {
+        if ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("hide_welcome"))).unwrap_or(false) {
             app.welcome_off = true;
         }
     }
@@ -826,7 +824,8 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
     }
     // the camera's picture of the bed, warped into place with the 4-point alignment
     if app.settings.camera.show {
-        if let (Some((_, tex)), Some(h)) = (&app.camera_tex, crate::camera::bed_to_image(&app.settings.camera, dev.width, dev.height)) {
+        let aspect = app.camera_tex.as_ref().map(|(_, t)| (t.size_vec2().x / t.size_vec2().y.max(1.0)) as f64).unwrap_or(1.0);
+        if let (Some((_, tex)), Some(h)) = (&app.camera_tex, crate::camera::bed_to_image(&app.settings.camera, dev.width, dev.height, aspect)) {
             let quad = app.settings.camera.bed(dev.width, dev.height);
             let n = 16usize;
             let mut mesh = egui::Mesh::with_texture(tex.id());
@@ -2531,7 +2530,7 @@ fn welcome(ui: &mut Ui, app: &App, rect: Rect, run: &mut Vec<Action>) {
             if resp.on_hover_text(app.tooltip(a)).clicked() {
                 run.push(a);
                 if a == Action::ToolRect {
-                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("hide_welcome"), true));
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("hide_welcome"), true));
                 }
             }
             ui.add_space(4.0);
@@ -2540,7 +2539,7 @@ fn welcome(ui: &mut Ui, app: &App, rect: Rect, run: &mut Vec<Action>) {
         ui.vertical_centered(|ui| {
             if ui.link("…or try a sample project").clicked() {
                 run.push(Action::New);
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("load_demo"), true));
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("load_demo"), true));
             }
             ui.label(egui::RichText::new(format!("Press {} to search all commands", app.settings.keymap.label(Action::CommandSearch))).size(11.0).color(col.weak));
         });
@@ -2744,7 +2743,7 @@ pub fn dim_editor(ctx: &egui::Context, app: &mut App) {
     let mut apply = false;
     let mut close = false;
     let u = app.settings.units;
-    egui::Area::new(egui::Id::new("dim_edit")).fixed_pos(pos + vec2(0.0, 4.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("dim_edit")).fixed_pos(pos + vec2(0.0, 4.0)).order(egui::Order::Foreground).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(dim.prefix());

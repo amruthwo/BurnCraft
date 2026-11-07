@@ -422,7 +422,7 @@ fn properties(ui: &mut Ui, app: &mut App) {
                         .on_hover_text("Fill in %0, %1… / {Column} from a .csv or .txt row, {serial}, {date} and {time}")
                         .changed();
                     if ui.small_button("Rows…").on_hover_text("Load the rows and choose the current one").clicked() {
-                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("run_action"), crate::actions::Action::VariableText));
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("run_action"), crate::actions::Action::VariableText));
                     }
                 });
                 ui.end_row();
@@ -558,7 +558,9 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
     }
     if dev.controller == crate::gcode::Controller::EzCad2 {
         ui.label(format!("{} galvo, {} mm lens, over USB", dev.galvo.source.label(), crate::geom::fmt_num(dev.galvo.lens)));
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(usb_lasers))]
+        ui.colored_label(egui::Color32::from_rgb(230, 150, 60), "USB lasers aren't supported on this system yet.");
+        #[cfg(usb_lasers)]
         {
             if let Some(r) = &app.usb_job {
                 let p = r.progress.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
@@ -581,7 +583,9 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
     }
     if dev.controller == crate::gcode::Controller::K40Nano {
         ui.label(format!("K40 with a {} board, over USB", dev.board));
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(usb_lasers))]
+        ui.colored_label(egui::Color32::from_rgb(230, 150, 60), "USB lasers aren't supported on this system yet; Save G-code still makes .egv files.");
+        #[cfg(usb_lasers)]
         {
             if let Some(r) = &app.usb_job {
                 let p = r.progress.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0;
@@ -905,7 +909,7 @@ fn num_field(ui: &mut Ui, id: &str, v: &mut f64, step: f64, suffix: &str, min: O
             let sc = ui.input(|i| i.smooth_scroll_delta.y);
             if sc.abs() > 0.0 {
                 // one step per notch of the wheel (smooth scrolling arrives spread over frames)
-                let acc_id = egui::Id::new(("num_scroll", id));
+                let acc_id = egui::Id::unique(("num_scroll", id));
                 let acc = ui.ctx().data_mut(|d| {
                     let a = d.get_temp_mut_or_default::<f32>(acc_id);
                     *a += sc;
