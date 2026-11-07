@@ -201,9 +201,10 @@ jobs:
         with:
           files: artifacts/**/*
 
-  # FreeBSD arm64 and riscv64 run in an emulated virtual machine, which takes from an hour to several hours.
-  # They start after the release is published and add their files to it when they finish, so they can never
-  # hold up or break a release.
+  # FreeBSD arm64 runs in an emulated virtual machine, which takes from an hour to several hours. It starts
+  # after the release is published and adds its file when it finishes, so it can never hold up or break a
+  # release. (riscv64 is left out for now: FreeBSD has no Rust package for it, so it would need cross-compiling.
+  # If it's added back, the VM action only supports `sync: scp` for riscv64.)
   freebsd-emulated:
     needs: release
     if: ${{ !cancelled() }}
@@ -212,8 +213,6 @@ jobs:
       matrix:
         include:
           - { arch: aarch64, name: arm64, sync: rsync }
-          # the VM action only supports scp syncing for riscv64
-          - { arch: riscv64, name: riscv64, sync: scp }
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:

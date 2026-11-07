@@ -74,12 +74,12 @@ Get the latest version from [Releases](https://github.com/amruthwo/BurnCraft/rel
 |---|---|---|---|---|
 | Linux | ✓ | ✓ | ✓ | .deb, .rpm (x86_64, arm64), .flatpak (x86_64), portable .tar.gz (all) |
 | Windows | ✓ | ✓ | | .msi (x86_64), setup .exe, portable .zip |
-| FreeBSD | ✓ | ✓ | ✓ | portable .tar.gz (USB lasers not supported yet) |
+| FreeBSD | ✓ | ✓ | | portable .tar.gz (USB lasers not supported yet) |
 | macOS | ✓ | ✓ | | universal .dmg and zipped .app |
 | Web / PWA | wasm32 | | | static site (installable) |
 
-FreeBSD arm64 and riscv64 are built on an emulated machine, so they're added to each release a few hours after
-the other files. AppImages aren't available yet.
+FreeBSD arm64 is built on an emulated machine, so it's added to each release a few hours after the other files.
+FreeBSD riscv64 and AppImages aren't available yet.
 
 **Try it in your browser:** <https://amruthwo.github.io/BurnCraft/>. You can open projects and pictures (or drop
 them on the page), and saving or exporting downloads the file. Settings are kept in the browser. It can't connect
