@@ -369,6 +369,12 @@ pub struct App {
     pub camera_error: Option<String>,
     /// Which alignment point the next click in the camera window sets (0..4).
     pub camera_pick: Option<usize>,
+    /// The update checker's progress (desktop).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub update: crate::update::net::Shared,
+    /// A newer version was found by the check at start-up and already announced.
+    pub update_announced: bool,
+    pub win_rotary: bool,
 }
 
 /// What a chosen file is for (the browser hands files over later, so the purpose travels with it).
@@ -491,6 +497,10 @@ impl App {
             camera_tex: None,
             camera_error: None,
             camera_pick: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            update: std::sync::Arc::new(std::sync::Mutex::new(crate::update::State::Idle)),
+            update_announced: false,
+            win_rotary: false,
         }
     }
 
@@ -900,6 +910,26 @@ impl App {
 
     /// After a job starts: the next variable-text row and serial number, when that's switched on and the
     /// project has variable text.
+    /// Is a rotary being used for jobs? (Galvo rotaries work differently and aren't covered yet.)
+    pub fn rotary_on(&self) -> bool {
+        self.settings.device.rotary.enabled && self.settings.device.controller != gcode::Controller::EzCad2
+    }
+
+    /// The design as the laser will run it: with a rotary, distances around the object become rotary travel
+    /// (and the G-code uses A instead of Y for an A-axis rotary). The preview keeps showing the flat design.
+    pub fn machine_job(&self) -> gcode::Job {
+        let dev = &self.settings.device;
+        if !self.rotary_on() {
+            return gcode::build_job(&self.doc, dev, None);
+        }
+        let d = crate::rotary::machine_doc(&self.doc, &dev.rotary, dev.height);
+        let mut job = gcode::build_job(&d, dev, None);
+        if dev.rotary.axis == crate::rotary::RotaryAxis::A && dev.controller.family() == gcode::Family::GCode {
+            job.gcode = crate::rotary::y_to_a(&job.gcode);
+        }
+        job
+    }
+
     pub fn advance_variable_text(&mut self, now: f64) {
         let has = self.doc.shapes.iter().any(|s| matches!(&s.kind, ShapeKind::Text { style, .. } if style.variable));
         if !has || !self.doc.vartext.advance {
@@ -1134,7 +1164,7 @@ impl App {
                 }
             }
             Action::ExportGcode => {
-                let job = gcode::build_job(&self.doc, &self.settings.device, None);
+                let job = self.machine_job();
                 let name = self.gcode_file_name(job.seconds);
                 let ruida = self.settings.device.controller == gcode::Controller::Ruida;
                 let k40 = self.settings.device.controller == gcode::Controller::K40Nano;
@@ -1381,7 +1411,8 @@ impl App {
             // (K40 and galvo lasers have their own Home and Frame further down)
             Action::LaserHome if !self.settings.device.controller.is_usb_laser() => self.laser.send(Cmd::Send(vec!["$H".into()])),
             Action::LaserFrame if !self.settings.device.controller.is_usb_laser() => {
-                let b = self.doc.bbox();
+                // with a rotary, frame where the rotary will actually move
+                let b = if self.rotary_on() { crate::rotary::machine_doc(&self.doc, &self.settings.device.rotary, self.settings.device.height).bbox() } else { self.doc.bbox() };
                 if b.is_empty() {
                     return;
                 }
@@ -1472,7 +1503,7 @@ impl App {
                     self.usb_job = Some(k40::usb::command("IPP", "K40 homed".into()));
                     return;
                 }
-                let job = gcode::build_job(&self.doc, &self.settings.device, None);
+                let job = self.machine_job();
                 if job.moves.iter().all(|m| m.power <= 0.0) {
                     self.job = Some(job);
                     self.error("Nothing to burn: no layer with Burn switched on has shapes inside the bed.", now);
@@ -1504,7 +1535,7 @@ impl App {
             // galvo Home (switched off: a galvo has nothing to home)
             Action::LaserHome | Action::LaserFrame => {}
             Action::LaserStart if self.settings.device.controller == gcode::Controller::Ruida => {
-                let job = gcode::build_job(&self.doc, &self.settings.device, None);
+                let job = self.machine_job();
                 if self.settings.device.ip.trim().is_empty() {
                     self.job = Some(job);
                     self.preview_on = true;
@@ -1517,7 +1548,13 @@ impl App {
                 self.advance_variable_text(now);
             }
             Action::LaserStart => {
-                let job = gcode::build_job(&self.doc, &self.settings.device, None);
+                let job = self.machine_job();
+                if self.rotary_on() {
+                    let now2 = now;
+                    for w in crate::rotary::warnings(&self.doc, &self.settings.device.rotary) {
+                        self.error(w, now2);
+                    }
+                }
                 if !self.laser.connected {
                     self.job = Some(job);
                     self.preview_on = true;
@@ -1656,6 +1693,7 @@ impl App {
             Action::Help => self.win_help = !self.win_help,
             Action::VariableText => self.win_vartext = !self.win_vartext,
             Action::Camera => self.win_camera = !self.win_camera,
+            Action::Rotary => self.win_rotary = !self.win_rotary,
             Action::WelcomeTour => {
                 self.win_settings = false;
                 self.win_help = false;

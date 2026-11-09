@@ -93,6 +93,8 @@ pub struct Settings {
     pub tour_done: bool,
     /// Camera source and alignment.
     pub camera: crate::camera::CameraSettings,
+    /// Ask GitHub for a newer version when BurnCraft starts.
+    pub check_updates: bool,
     pub selection_cad_style: bool,
     /// Layer settings applied to layers of new projects.
     pub layer_defaults: Vec<crate::model::CutSetting>,
@@ -175,6 +177,7 @@ impl Default for Settings {
             ribbon_compact: true,
             tour_done: false,
             camera: Default::default(),
+            check_updates: true,
             selection_cad_style: true,
             layer_defaults: Vec::new(),
             pinned: ["Save", "Undo", "Redo", "ToolSelect", "ToolLine", "ToolRect", "ToolEllipse", "ToolText", "TraceImage", "Preview", "LaserStart"].iter().map(|s| s.to_string()).collect(),
@@ -233,7 +236,7 @@ impl Settings {
             "ui_scale": self.ui_scale,
             "units": if self.units == Units::Mm { "mm" } else { "in" },
             "keymap": self.keymap.to_json(),
-            "device": { "name": d.name, "width": d.width, "height": d.height, "s_max": d.s_max, "rapid_speed": d.rapid_speed, "baud": d.baud, "port": d.port, "dynamic_power": d.dynamic_power, "controller": d.controller.id(), "ip": d.ip, "board": d.board, "galvo": serde_json::to_value(&d.galvo).unwrap_or(Value::Null),
+            "device": { "name": d.name, "width": d.width, "height": d.height, "s_max": d.s_max, "rapid_speed": d.rapid_speed, "baud": d.baud, "port": d.port, "dynamic_power": d.dynamic_power, "controller": d.controller.id(), "ip": d.ip, "board": d.board, "galvo": serde_json::to_value(&d.galvo).unwrap_or(Value::Null), "rotary": serde_json::to_value(&d.rotary).unwrap_or(Value::Null),
                 "inner_first": d.opt.inner_first, "reduce_travel": d.opt.reduce_travel, "best_direction": d.opt.best_direction, "best_start": d.opt.best_start },
             "mcp": { "command": self.mcp.command, "args": self.mcp.args, "tool": self.mcp.tool, "instructions": self.mcp.instructions },
             "recent": self.recent,
@@ -246,6 +249,7 @@ impl Settings {
             "ribbon_compact": self.ribbon_compact,
             "tour_done": self.tour_done,
             "camera": serde_json::to_value(&self.camera).unwrap_or(Value::Null),
+            "check_updates": self.check_updates,
             "selection_cad_style": self.selection_cad_style,
             "layer_defaults": self.layer_defaults_xml(),
             "pinned": self.pinned,
@@ -293,6 +297,9 @@ impl Settings {
             if let Some(g) = d.get("galvo").and_then(|g| serde_json::from_value(g.clone()).ok()) {
                 dv.galvo = g;
             }
+            if let Some(r) = d.get("rotary").and_then(|r| serde_json::from_value(r.clone()).ok()) {
+                dv.rotary = r;
+            }
             dv.board = t(d, "board").filter(|b| crate::k40::BOARDS.contains(&b.as_str())).unwrap_or_else(|| "M2".into());
             dv.opt.inner_first = b(d, "inner_first").unwrap_or(dv.opt.inner_first);
             dv.opt.reduce_travel = b(d, "reduce_travel").unwrap_or(dv.opt.reduce_travel);
@@ -319,6 +326,7 @@ impl Settings {
         if let Some(c) = v.get("camera").and_then(|c| serde_json::from_value(c.clone()).ok()) {
             s.camera = c;
         }
+        s.check_updates = b(v, "check_updates").unwrap_or(s.check_updates);
         s.selection_cad_style = b(v, "selection_cad_style").unwrap_or(true);
         if let Some(x) = v.get("layer_defaults").and_then(|x| x.as_str()) {
             if let Ok(root) = crate::xml::parse(x) {

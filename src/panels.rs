@@ -759,12 +759,9 @@ pub fn bottom_bar(ui: &mut Ui, app: &mut App) {
                 }
             });
         });
+        // right to left: the snap buttons sit at the far right so they never move; the zoom and the cursor
+        // position (which comes and goes) are to their left
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let u = app.settings.units;
-            if let Some(w) = app.canvas.hover_world {
-                ui.label(RichText::new(format!("X {:>8.2}  Y {:>8.2} {}", w.x * u.factor(), w.y * u.factor(), u.suffix())).monospace().color(col.weak));
-            }
-            ui.label(RichText::new(format!("{:.0}%", app.view.zoom / 3.78 * 100.0)).color(col.weak)).on_hover_text("Zoom (100% ≈ real size on a 96 DPI screen)");
             let mut sg = app.settings.snap_grid;
             if ui.toggle_value(&mut sg, "Grid snap").changed() {
                 app.settings.snap_grid = sg;
@@ -772,6 +769,11 @@ pub fn bottom_bar(ui: &mut Ui, app: &mut App) {
             let mut sp = app.settings.snap_points;
             if ui.toggle_value(&mut sp, "Smart guides").on_hover_text("Snap to endpoints, midpoints and centres; line up horizontally/vertically with points you rest on; parallel/perpendicular to lines you rest on").changed() {
                 app.settings.snap_points = sp;
+            }
+            ui.label(RichText::new(format!("{:.0}%", app.view.zoom / 3.78 * 100.0)).color(col.weak)).on_hover_text("Zoom (100% ≈ real size on a 96 DPI screen)");
+            let u = app.settings.units;
+            if let Some(w) = app.canvas.hover_world {
+                ui.label(RichText::new(format!("X {:>8.2}  Y {:>8.2} {}", w.x * u.factor(), w.y * u.factor(), u.suffix())).monospace().color(col.weak));
             }
         });
     });

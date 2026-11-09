@@ -1,6 +1,6 @@
 [package]
 name = "burncraft"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "BurnCraft: an open-source laser design and control app (LightBurn-compatible projects)"
 readme = "README.md"
@@ -38,6 +38,8 @@ eframe = { version = "0.37", default-features = false, features = ["glow", "defa
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 serialport = { version = "4.10", default-features = false }
 ureq = { version = "3", features = ["json"] }
+# Update checker: verifies downloads against GitHub's SHA-256.
+sha2 = "0.10"
 
 # K40 M2 Nano and galvo (JCZ/LMC) boards over USB (pure Rust, no libusb). nusb has no FreeBSD backend, so
 # USB lasers are built where it does (build.rs sets `usb_lasers` for the same systems).

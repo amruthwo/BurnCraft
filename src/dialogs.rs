@@ -24,6 +24,7 @@ pub fn all(ctx: &Context, app: &mut App, run: &mut Vec<Action>) {
     crate::help::window(ctx, app);
     vartext(ctx, app);
     camera(ctx, app);
+    rotary(ctx, app);
     toasts(ctx, app);
 }
 
@@ -157,6 +158,8 @@ fn settings(ctx: &Context, app: &mut App) {
                 app.win_help = true;
             }
         });
+        ui.separator();
+        save |= about_ui(ui, app);
         ui.separator();
         ui.label(RichText::new("Look and feel").strong());
         egui::Grid::new("s1").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
@@ -1151,6 +1154,153 @@ fn toasts(ctx: &Context, app: &mut App) {
 
 #[allow(dead_code)]
 fn _unused(_: P2) {}
+
+/// Rotary setup: kind, axis, travel per turn and diameters.
+fn rotary(ctx: &Context, app: &mut App) {
+    use crate::rotary::{RotaryAxis, RotaryKind};
+    if !app.win_rotary {
+        return;
+    }
+    let mut open = true;
+    let mut save = false;
+    let galvo = app.settings.device.controller == crate::gcode::Controller::EzCad2;
+    let gcode = app.settings.device.controller.family() == crate::gcode::Family::GCode;
+    let warnings = crate::rotary::warnings(&app.doc, &app.settings.device.rotary);
+    egui::Window::new("Rotary").open(&mut open).default_width(460.0).show(ctx, |ui| {
+        let r = &mut app.settings.device.rotary;
+        save |= ui.checkbox(&mut r.enabled, RichText::new("Use the rotary for jobs").strong()).changed();
+        if galvo {
+            ui.colored_label(Color32::from_rgb(230, 150, 60), "Galvo rotaries aren't supported yet; this setting is ignored for galvo lasers.");
+        }
+        ui.label(RichText::new("Draw the design flat, as if the object's surface were unrolled: its height is the distance around the object.").size(11.5).weak());
+        egui::Grid::new("rotary").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+            ui.label("Type");
+            ui.horizontal(|ui| {
+                save |= ui.selectable_value(&mut r.kind, RotaryKind::Roller, "Roller").on_hover_text("The object rests on turning rollers").changed();
+                save |= ui.selectable_value(&mut r.kind, RotaryKind::Chuck, "Chuck").on_hover_text("The object is held in a chuck that turns").changed();
+            });
+            ui.end_row();
+            ui.label("Connected as");
+            ui.horizontal(|ui| {
+                save |= ui.selectable_value(&mut r.axis, RotaryAxis::Y, "Y axis").on_hover_text("Plugged in instead of the Y motor (most diode, GRBL and K40 setups)").changed();
+                save |= ui.add_enabled(gcode, egui::Button::selectable(r.axis == RotaryAxis::A, "A axis")).on_hover_text("A fourth axis: the G-code says A instead of Y (G-code controllers only)").clicked().then(|| r.axis = RotaryAxis::A).is_some();
+            });
+            ui.end_row();
+            ui.label("Travel per turn");
+            let unit = if r.axis == RotaryAxis::A { " units" } else { " mm" };
+            save |= ui
+                .add(egui::DragValue::new(&mut r.units_per_turn).range(0.1..=100000.0).speed(0.5).suffix(unit))
+                .on_hover_text("How far the axis moves for one full turn of the roller or chuck. Mark it, jog until it has turned exactly once, and read the distance (an A axis set up in degrees: 360)")
+                .changed();
+            ui.end_row();
+            if r.kind == RotaryKind::Roller {
+                ui.label("Roller diameter");
+                save |= ui.add(egui::DragValue::new(&mut r.roller_diameter).range(1.0..=500.0).speed(0.1).suffix(" mm")).on_hover_text("The roller that drives the object").changed();
+                ui.end_row();
+            }
+            ui.label("Object diameter");
+            save |= ui.add(egui::DragValue::new(&mut r.object_diameter).range(1.0..=2000.0).speed(0.1).suffix(" mm")).changed();
+            ui.end_row();
+            ui.label("Around the object");
+            ui.label(format!("{:.1} mm (the tallest the design can be)", r.circumference()));
+            ui.end_row();
+            ui.label("Direction");
+            save |= ui.checkbox(&mut r.reverse, "Turn the other way").on_hover_text("If burns come out upside down").changed();
+            ui.end_row();
+        });
+        for w in &warnings {
+            ui.colored_label(Color32::from_rgb(230, 150, 60), w);
+        }
+        ui.label(RichText::new("Frame checks the area first. The rotary turns about the middle of the design: put the laser over the middle of where you want it on the object. This is new and untested on real rotaries: try a cheap object first.").size(11.0).weak());
+    });
+    if save {
+        let now = ctx.input(|i| i.time);
+        app.save_settings(now);
+    }
+    if !open {
+        app.win_rotary = false;
+    }
+}
+
+/// Version, how this copy was installed, and the update checker. Returns true when a setting changed.
+fn about_ui(ui: &mut egui::Ui, app: &mut App) -> bool {
+    use crate::update::{self, State};
+    let mut save = false;
+    let kind = update::detect();
+    ui.label(RichText::new("About BurnCraft").strong());
+    ui.label(format!("Version {} · {} · {} {}", update::CURRENT, kind.label(), std::env::consts::OS, std::env::consts::ARCH));
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (&mut save, &app);
+        ui.label(RichText::new("The browser version is always the newest one: reload the page to get updates.").size(11.0).weak());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let st = app.update.lock().map(|s| s.clone()).unwrap_or(State::Idle);
+        let busy = matches!(st, State::Checking | State::Downloading { .. });
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!busy, egui::Button::new("Check for updates")).on_hover_text("Ask GitHub whether there's a newer version").clicked() {
+                update::net::check(app.update.clone());
+            }
+            save |= ui.checkbox(&mut app.settings.check_updates, "Check when BurnCraft starts").on_hover_text("Only BurnCraft's release list on GitHub is asked; nothing about you is sent").changed();
+        });
+        let now = ui.input(|i| i.time);
+        match st {
+            State::Idle => {}
+            State::Checking => {
+                ui.label("Checking GitHub…");
+            }
+            State::UpToDate(tag) => {
+                ui.label(format!("You have the newest version ({}).", tag.trim_start_matches('v')));
+            }
+            State::Available { release, asset } => {
+                ui.label(RichText::new(format!("BurnCraft {} is available.", release.tag.trim_start_matches('v'))).color(ACCENT).strong());
+                ui.horizontal_wrapped(|ui| {
+                    match &asset {
+                        Some(a) => {
+                            if ui.button(format!("Download {} ({:.1} MB)", a.name, a.size as f64 / 1_048_576.0)).on_hover_text("The same kind of file and processor as this copy").clicked() {
+                                update::net::download(app.update.clone(), a.clone());
+                            }
+                        }
+                        None => {
+                            ui.label(RichText::new(format!("This release has no {} for {}; download another kind from the release page.", kind.label(), std::env::consts::ARCH)).weak());
+                        }
+                    }
+                    if ui.link("What's new / all downloads").clicked() {
+                        if let Err(e) = update::net::open(&release.page) {
+                            app.error(format!("Couldn't open the browser: {e}"), now);
+                        }
+                    }
+                });
+            }
+            State::Downloading { asset, done } => {
+                let f = if asset.size > 0 { done as f32 / asset.size as f32 } else { 0.0 };
+                ui.add(egui::ProgressBar::new(f).text(format!("Downloading {} — {:.1} MB", asset.name, done as f64 / 1_048_576.0)));
+            }
+            State::Downloaded(path) => {
+                ui.label(format!("Saved to {}", path.display()));
+                ui.horizontal(|ui| {
+                    if kind.installs() && ui.button("Install").on_hover_text("Opens it with your system's installer; close BurnCraft when asked").clicked() {
+                        if let Err(e) = update::net::open(&path.to_string_lossy()) {
+                            app.error(format!("Couldn't open the installer: {e}"), now);
+                        }
+                    }
+                    if ui.button("Show in folder").clicked() {
+                        let dir = path.parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
+                        let _ = update::net::open(&dir);
+                    }
+                });
+                if !kind.installs() {
+                    ui.label(RichText::new("Unpack it in place of this copy (close BurnCraft first). Your settings are kept.").size(11.0).weak());
+                }
+            }
+            State::Failed(e) => {
+                ui.colored_label(Color32::from_rgb(230, 90, 80), format!("Update check: {e}"));
+            }
+        }
+    }
+    save
+}
 
 /// Variable text: load rows from a .csv / .txt file, pick the current row, serial numbers.
 fn vartext(ctx: &Context, app: &mut App) {

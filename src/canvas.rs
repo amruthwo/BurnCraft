@@ -852,6 +852,20 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
             painter.add(egui::Shape::mesh(mesh));
         }
     }
+    // rotary: the band one turn around the object covers, centred on the design
+    if app.rotary_on() {
+        let r = &app.settings.device.rotary;
+        let y0 = crate::rotary::centre_line(&app.doc, dev.height);
+        let half = r.circumference() / 2.0;
+        let band = Color32::from_rgba_unmultiplied(230, 150, 60, 200);
+        for y in [y0 - half, y0 + half] {
+            let a = tf.s(p2(0.0, y));
+            let b = tf.s(p2(dev.width, y));
+            painter.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.5, band), 8.0, 5.0));
+        }
+        painter.text(tf.s(p2(dev.width, y0 + half)) + vec2(-4.0, -4.0), Align2::RIGHT_BOTTOM, format!("rotary: one turn, {:.1} mm", r.circumference()), FontId::proportional(11.0), band);
+        painter.line_segment([tf.s(p2(0.0, y0)), tf.s(p2(dev.width, y0))], Stroke::new(1.0, band.gamma_multiply(0.5)));
+    }
     let o = tf.s(p2(0.0, 0.0));
     painter.circle_filled(o, 4.0, ACCENT);
     painter.line_segment([o, o + vec2(22.0, 0.0)], Stroke::new(2.0, Color32::from_rgb(230, 80, 80)));

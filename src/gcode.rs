@@ -239,11 +239,13 @@ pub struct Device {
     pub board: String,
     /// Galvo (JCZ / LMC) machine settings.
     pub galvo: crate::galvo::GalvoSettings,
+    /// Rotary attachment (roller or chuck), when one is fitted.
+    pub rotary: crate::rotary::RotarySettings,
 }
 
 impl Default for Device {
     fn default() -> Self {
-        Device { controller: Controller::Grbl, ip: String::new(), opt: CutOptimize::default(), name: "GRBL laser".into(), width: LBDEV_DEFAULT_WIDTH, height: LBDEV_DEFAULT_HEIGHT, s_max: 1000.0, rapid_speed: 100.0, baud: 115200, port: String::new(), dynamic_power: true, board: "M2".into(), galvo: Default::default() }
+        Device { controller: Controller::Grbl, ip: String::new(), opt: CutOptimize::default(), name: "GRBL laser".into(), width: LBDEV_DEFAULT_WIDTH, height: LBDEV_DEFAULT_HEIGHT, s_max: 1000.0, rapid_speed: 100.0, baud: 115200, port: String::new(), dynamic_power: true, board: "M2".into(), galvo: Default::default(), rotary: Default::default() }
     }
 }
 

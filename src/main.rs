@@ -31,6 +31,7 @@ mod platform;
 mod relations;
 mod ruida;
 mod ribbon;
+mod rotary;
 mod settings;
 mod shortcuts;
 mod sketch;
@@ -40,6 +41,7 @@ mod ai;
 mod text;
 mod theme;
 mod tour;
+mod update;
 mod vartext;
 mod xml;
 
@@ -91,6 +93,11 @@ impl Root {
                     app.sel = vec![2];
                 }
                 "camera" => app.win_camera = true,
+                "rotary" => {
+                    app.win_rotary = true;
+                    app.settings.device.rotary.enabled = true;
+                }
+                "settings" => app.win_settings = true,
                 "galvo" => {
                     app.settings.device.controller = gcode::Controller::EzCad2;
                     app.win_settings = true;
@@ -256,6 +263,11 @@ impl eframe::App for Root {
                 self.app.open_path(p, 0.0);
             }
             self.app.ports = laser::Laser::ports();
+            // ask GitHub for a newer version (Settings → About BurnCraft can switch this off)
+            #[cfg(not(target_arch = "wasm32"))]
+            if self.app.settings.check_updates && self.app.screenshot.is_none() {
+                update::net::check(self.app.update.clone());
+            }
             app::set_layer_defaults(&self.app.settings.layer_defaults);
         }
         self.screenshot_step(&ctx);
@@ -413,6 +425,20 @@ impl eframe::App for Root {
             }
         } else if app.net_job.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        // update checker: announce a newer version once, keep redrawing while it works
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let st = app.update.lock().map(|s| s.clone()).unwrap_or(update::State::Idle);
+            match st {
+                update::State::Available { release, .. } if !app.update_announced => {
+                    app.update_announced = true;
+                    let now = ctx.input(|i| i.time);
+                    app.toast(format!("BurnCraft {} is available: Settings → About BurnCraft", release.tag.trim_start_matches('v')), now);
+                }
+                update::State::Checking | update::State::Downloading { .. } => ctx.request_repaint_after(std::time::Duration::from_millis(250)),
+                _ => {}
+            }
         }
         // a K40 / galvo job or command finished?
         #[cfg(usb_lasers)]

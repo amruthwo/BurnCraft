@@ -64,6 +64,10 @@ with **Preview** and **Frame** at low power before burning it for real.
 * Camera overlay: a USB camera (Linux), a network camera's snapshot address or a photo, lined up with four points.
   The network camera address you type is the only place BurnCraft fetches pictures from.
 * Imports EZCad2 projects (`.ezd`): shapes, text, pictures, hatches, and pens as layers.
+* Rotary attachments (roller or chuck, as the Y axis or an A axis; new, not yet tested on real rotaries).
+* Update checker: Settings → About shows the version and can download the matching new release (same package
+  type and processor), checked against GitHub's checksum. At start BurnCraft asks GitHub for its latest release;
+  this can be switched off, and nothing about you is sent.
 * Built-in help and a replayable Welcome Tour.
 
 ## Download

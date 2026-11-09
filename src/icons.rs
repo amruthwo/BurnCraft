@@ -16,7 +16,7 @@ pub enum Icon {
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
     Pen, Arc, Star, Trim, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
-    Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera,
+    Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary,
 }
 
 pub struct Pal {
@@ -643,6 +643,15 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             rf(rect_at(0.12, 0.43, 0.6, 0.61), pal.soft);
             line(&[(0.66, 0.2), (0.92, 0.2)], ac);
             line(&[(0.79, 0.2), (0.79, 0.62)], ac);
+        }
+        Icon::Rotary => {
+            // a cylinder lying on two rollers, with a turning arrow
+            rs(rect_at(0.18, 0.28, 0.82, 0.62), st);
+            line(&[(0.18, 0.45), (0.82, 0.45)], thin);
+            circ(0.32, 0.78, 0.09, st);
+            circ(0.68, 0.78, 0.09, st);
+            arc(0.5, 0.45, 0.36, -2.6, -0.55, ac);
+            arrow_head((0.5 + 0.36 * (-0.55f32).cos(), 0.45 + 0.36 * (-0.55f32).sin()), (0.6, 0.8), ac);
         }
         Icon::Camera => {
             closed(&[(0.12, 0.32), (0.32, 0.32), (0.4, 0.2), (0.6, 0.2), (0.68, 0.32), (0.88, 0.32), (0.88, 0.8), (0.12, 0.8)], Color32::TRANSPARENT, st);

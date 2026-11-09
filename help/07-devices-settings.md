@@ -40,6 +40,23 @@ This support follows the open-source MeerK40t project's galvo driver and **hasn'
 
 You can also **import EZCad2 projects (.ezd)**: shapes, text, pictures and hatches come in, and each EZCad pen becomes a layer with its speed, power, passes and frequency. Hatched areas become Fill layers. Exporting to .ezd isn't possible: the format is undocumented.
 
+## Rotary (roller or chuck)
+
+**Rotary** (Laser tab) sets up burning around cylinders such as tumblers, bottles and pens. This is new and hasn't been tested on real rotaries yet: try a cheap object first.
+
+1. Draw the design flat, as if the object's surface were unrolled: its height is the distance around the object. The canvas shows a dashed band for one full turn.
+2. Choose **Roller** (the object rests on turning rollers) or **Chuck** (the object is clamped and turns).
+3. **Connected as**: **Y axis** when the rotary is plugged in instead of the Y motor (most diode, GRBL and K40 machines), or **A axis** on G-code controllers with a fourth axis (the G-code then says A instead of Y).
+4. **Travel per turn**: how far the axis moves for one full turn of the roller or chuck. Put a mark on it, jog until it has turned exactly once, and read the distance. (An A axis set up in degrees: 360.)
+5. Enter the **roller diameter** (rollers) and the **object diameter**.
+6. Put the laser over the middle of where the design should go, **Frame**, then **Start**. The rotary turns about the middle of the design.
+
+Not covered yet: galvo rotaries, and engraving that follows tapered objects.
+
+## About BurnCraft and updates
+
+Settings → **About BurnCraft** shows the version, how this copy was installed and the computer it runs on. **Check for updates** asks GitHub for a newer version; **Check when BurnCraft starts** does it automatically (only BurnCraft's release list is asked, and nothing about you is sent). A newer version can be downloaded straight away: BurnCraft picks the same kind of file (.rpm, .deb, Flatpak, Windows installer or zip, macOS app, tarball) for the same processor, and checks it against GitHub's checksum. **Install** then opens it with your system's installer; zips and tarballs are unpacked in place of the old copy by hand.
+
 ## Other settings
 
 - Theme, interface size, units (mm or inches), grid spacing.

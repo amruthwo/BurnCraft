@@ -119,6 +119,7 @@ actions! {
     SaveLayerDefaults: "Save Layer Defaults", Layers, "Laser", "Use this project's layer settings for every new project", [], [];
     VariableText: "Variable Text", VarText, "Laser", "Fill text from a .csv / .txt file, a serial number or the date, a new row each job", [], [];
     Camera: "Camera", Camera, "Laser", "Show the laser's camera picture on the bed, and line it up", [], [];
+    Rotary: "Rotary", Rotary, "Laser", "Burn around cylinders with a roller or chuck rotary", [], [];
     NewTab: "New Tab", NewTab, "File", "Open an empty project in a new tab", ["Ctrl+Shift+N"], ["Ctrl+Shift+N"];
     DuplicateTab: "Duplicate Tab", DuplicateTab, "File", "Copy this project into a new tab", [], [];
     CloseTab: "Close Tab", CloseTab, "File", "Close this project tab", ["Ctrl+F4"], ["Ctrl+F4"];
