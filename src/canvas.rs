@@ -810,16 +810,19 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
             draw_grid(&painter, tf, &dev, minor, grid_minor);
         }
         draw_grid(&painter, tf, &dev, major, grid_major);
-        let mut x = 0.0;
-        let step = nice_step(80.0 / zoom);
-        while x <= dev.width + 1e-6 {
-            painter.text(tf.s(p2(x, 0.0)) + vec2(2.0, 3.0), Align2::LEFT_TOP, fmt_num(x * app.settings.units.factor()), FontId::proportional(10.0), col.weak);
-            x += step;
+        // ruler numbers at round steps of the chosen units (1, 2, 5, 10… mm or inches)
+        let f = app.settings.units.factor();
+        let step_u = nice_step(80.0 / zoom * f);
+        let label = |k: usize| fmt_num(((k as f64 * step_u) * 1e6).round() / 1e6);
+        let mut k = 0;
+        while k as f64 * step_u / f <= dev.width + 1e-6 {
+            painter.text(tf.s(p2(k as f64 * step_u / f, 0.0)) + vec2(2.0, 3.0), Align2::LEFT_TOP, label(k), FontId::proportional(10.0), col.weak);
+            k += 1;
         }
-        let mut y = step;
-        while y <= dev.height + 1e-6 {
-            painter.text(tf.s(p2(0.0, y)) + vec2(-4.0, 0.0), Align2::RIGHT_CENTER, fmt_num(y * app.settings.units.factor()), FontId::proportional(10.0), col.weak);
-            y += step;
+        let mut k = 1;
+        while k as f64 * step_u / f <= dev.height + 1e-6 {
+            painter.text(tf.s(p2(0.0, k as f64 * step_u / f)) + vec2(-4.0, 0.0), Align2::RIGHT_CENTER, label(k), FontId::proportional(10.0), col.weak);
+            k += 1;
         }
     }
     // the camera's picture of the bed, warped into place with the 4-point alignment
@@ -863,7 +866,7 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
             let b = tf.s(p2(dev.width, y));
             painter.extend(egui::Shape::dashed_line(&[a, b], Stroke::new(1.5, band), 8.0, 5.0));
         }
-        painter.text(tf.s(p2(dev.width, y0 + half)) + vec2(-4.0, -4.0), Align2::RIGHT_BOTTOM, format!("rotary: one turn, {:.1} mm", r.circumference()), FontId::proportional(11.0), band);
+        painter.text(tf.s(p2(dev.width, y0 + half)) + vec2(-4.0, -4.0), Align2::RIGHT_BOTTOM, format!("rotary: one turn, {} {}", fmt_num(app.settings.units.round(r.circumference())), app.settings.units.suffix()), FontId::proportional(11.0), band);
         painter.line_segment([tf.s(p2(0.0, y0)), tf.s(p2(dev.width, y0))], Stroke::new(1.0, band.gamma_multiply(0.5)));
     }
     let o = tf.s(p2(0.0, 0.0));
@@ -1229,15 +1232,15 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
                     painter.add(EShape::line(l.iter().map(|p| tf.s(*p)).collect(), Stroke::new(1.5, ACCENT)));
                 }
                 let b = shape.bbox();
-                painter.text(tf.s(b.max) + vec2(6.0, -4.0), Align2::LEFT_BOTTOM, format!("{} × {}", fmt_num((b.width() * 10.0).round() / 10.0), fmt_num((b.height() * 10.0).round() / 10.0)), FontId::proportional(11.0), ACCENT);
+                painter.text(tf.s(b.max) + vec2(6.0, -4.0), Align2::LEFT_BOTTOM, format!("{} × {} {}", fmt_num(app.settings.units.round(b.width())), fmt_num(app.settings.units.round(b.height())), app.settings.units.suffix()), FontId::proportional(11.0), ACCENT);
             }
         }
-        Some(Drag::Measure { start, cur }) => draw_measure(&painter, tf, *start, *cur),
+        Some(Drag::Measure { start, cur }) => draw_measure(&painter, tf, *start, *cur, app.settings.units),
         _ => {}
     }
     if app.canvas.drag.is_none() && app.tool == Tool::Measure {
         if let Some((a, b)) = app.canvas.last_measure {
-            draw_measure(&painter, tf, a, b);
+            draw_measure(&painter, tf, a, b, app.settings.units);
         }
     }
     // line tool rubber band
@@ -1278,7 +1281,7 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
             if tf.s(first).distance(tf.s(snapped)) < 10.0 && app.canvas.line_pts.len() > 2 {
                 painter.circle_stroke(tf.s(first), 9.0, Stroke::new(2.0, ACCENT));
             }
-            segment_label(&painter, tf, *app.canvas.line_pts.last().unwrap(), snapped);
+            segment_label(&painter, tf, *app.canvas.line_pts.last().unwrap(), snapped, app.settings.units);
         }
     }
     // pen tool preview
@@ -1315,6 +1318,7 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
         }
     }
     draw_guides(app, &painter, tf, raw_world.is_some() && !mods.shift);
+    draw_nest_preview(app, &painter, tf);
     if app.tool == Tool::Dimension {
         draw_dims(app, &painter, tf, view_box);
     } else {
@@ -1339,10 +1343,10 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
     }
 }
 
-fn segment_label(painter: &egui::Painter, tf: &Tf, from: P2, to: P2) {
+fn segment_label(painter: &egui::Painter, tf: &Tf, from: P2, to: P2, u: crate::settings::Units) {
     let d = from.dist(to);
     let ang = (to - from).y.atan2((to - from).x).to_degrees();
-    painter.text(tf.s(to) + vec2(12.0, -12.0), Align2::LEFT_BOTTOM, format!("{:.2} mm  {:.1}°", d, ang), FontId::proportional(11.0), ACCENT);
+    painter.text(tf.s(to) + vec2(12.0, -12.0), Align2::LEFT_BOTTOM, format!("{} {}  {:.1}°", fmt_num(u.round(d)), u.suffix(), ang), FontId::proportional(11.0), ACCENT);
 }
 
 fn ops_bbox(app: &App) -> BBox {
@@ -1376,13 +1380,13 @@ fn draw_grid(painter: &egui::Painter, tf: &Tf, dev: &crate::gcode::Device, step:
     }
 }
 
-fn draw_measure(painter: &egui::Painter, tf: &Tf, a: P2, b: P2) {
+fn draw_measure(painter: &egui::Painter, tf: &Tf, a: P2, b: P2, u: crate::settings::Units) {
     let c = Color32::from_rgb(255, 200, 40);
     painter.line_segment([tf.s(a), tf.s(b)], Stroke::new(1.5, c));
     painter.circle_filled(tf.s(a), 3.0, c);
     painter.circle_filled(tf.s(b), 3.0, c);
     let d = b - a;
-    painter.text(tf.s(a.lerp(b, 0.5)) + vec2(8.0, -8.0), Align2::LEFT_BOTTOM, format!("{:.2} mm   ΔX {:.2}  ΔY {:.2}   {:.1}°", d.len(), d.x, d.y, d.y.atan2(d.x).to_degrees()), FontId::proportional(12.0), c);
+    painter.text(tf.s(a.lerp(b, 0.5)) + vec2(8.0, -8.0), Align2::LEFT_BOTTOM, format!("{} {}   ΔX {}  ΔY {}   {:.1}°", fmt_num(u.round(d.len())), u.suffix(), fmt_num(u.round(d.x)), fmt_num(u.round(d.y)), d.y.atan2(d.x).to_degrees()), FontId::proportional(12.0), c);
 }
 
 /// Points inside a closed polygon (even-odd).
@@ -2027,6 +2031,17 @@ fn pen_path(verts: &[Vert], closed: bool) -> PathData {
     PathData { verts: verts.to_vec(), prims }
 }
 
+/// "C" while drawing with the Line or Pen tool: join the last point back to the first and finish, like CAD
+/// programs. False if nothing is being drawn (or too little to close), so the key keeps its usual job.
+pub fn close_drawing(app: &mut App) -> bool {
+    match app.tool {
+        Tool::Line if app.canvas.line_pts.len() >= 3 => finish_line(app, true),
+        Tool::Pen if app.canvas.pen.len() >= 2 => finish_pen(app, true),
+        _ => return false,
+    }
+    true
+}
+
 fn finish_pen(app: &mut App, close: bool) {
     let mut verts = std::mem::take(&mut app.canvas.pen);
     verts.dedup_by(|a, b| a.p.dist(b.p) < 1e-6);
@@ -2412,6 +2427,31 @@ fn draw_off_bed(app: &mut App, painter: &egui::Painter, tf: &Tf, bed_box: BBox, 
 }
 
 /// Relation tags next to the items they tie, the Relations tool's picks, and what is under the cursor.
+/// Nest preview: where the parts (and copies) will go, before Apply.
+fn draw_nest_preview(app: &App, painter: &egui::Painter, tf: &Tf) {
+    let Some((r, _)) = &app.nest_result else { return };
+    let fill = ACCENT.gamma_multiply(0.12);
+    let stroke = Stroke::new(1.6, ACCENT);
+    for p in &r.placed {
+        let Some(s) = app.doc.shapes.get(p.shape) else { continue };
+        for l in s.world_outline(0.2) {
+            let pts: Vec<Pos2> = l.iter().map(|q| tf.s(p.delta.apply(*q))).collect();
+            if pts.len() < 2 {
+                continue;
+            }
+            if is_closed(&l) && pts.len() >= 4 {
+                painter.add(egui::Shape::closed_line(pts.clone(), stroke));
+                // a light wash on simple outlines only (convex fill would mislead on concave ones)
+                if pts.len() <= 6 {
+                    painter.add(egui::Shape::convex_polygon(pts, fill, Stroke::NONE));
+                }
+            } else {
+                painter.add(egui::Shape::line(pts, stroke));
+            }
+        }
+    }
+}
+
 fn draw_relations(app: &mut App, painter: &egui::Painter, tf: &Tf, zoom: f64) {
     use crate::relations::Ent;
     let green = Color32::from_rgb(70, 200, 120);

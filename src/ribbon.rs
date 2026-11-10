@@ -38,6 +38,7 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Align", vec![AlignLeft, AlignVCenter, AlignRight, AlignTop, AlignHCenter, AlignBottom]),
             ("Distribute", vec![DistributeH, DistributeV]),
             ("Position", vec![PageCenter, PushFront, PushBack]),
+            ("Nest", vec![Nest]),
         ],
         RibbonTab::Image => vec![
             ("Bring in", vec![Import]),
@@ -453,19 +454,20 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
         icons::paint(ui.painter(), ir, tool.action().icon(), &pal(ui, true, true));
         ui.label(egui::RichText::new(tool.action().label()).strong());
         ui.separator();
+        let u = app.settings.units;
         let o = &mut app.opts;
 
         match tool {
             Tool::Rect => {
                 ui.label("Corner radius");
-                ui.add(mm(&mut o.rect_radius, 500.0));
+                ui.add(mm(u, &mut o.rect_radius, 500.0));
                 ui.label(egui::RichText::new("Shift = square · Ctrl = from centre").color(c.weak).size(11.0));
             }
             Tool::Polygon => {
                 ui.label("Sides");
                 ui.add(egui::DragValue::new(&mut o.poly_sides).range(3..=crate::sketch::POLYGON_MAX_SIDES));
                 ui.label("Corner radius");
-                ui.add(mm(&mut o.poly_radius, 500.0));
+                ui.add(mm(u, &mut o.poly_radius, 500.0));
             }
             Tool::Star => {
                 ui.label("Points");
@@ -475,7 +477,7 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
                 ui.label("Bulge");
                 ui.add(egui::DragValue::new(&mut o.star_bulge).range(0.0..=1.0).speed(0.05).max_decimals(2));
                 ui.label("Corner radius");
-                ui.add(mm(&mut o.star_radius, 200.0));
+                ui.add(mm(u, &mut o.star_radius, 200.0));
             }
             Tool::Arc => {
                 for m in ArcMode::ALL {
@@ -501,27 +503,27 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
                 match o.fillet.kind {
                     Round => {
                         ui.label("Radius");
-                        ui.add(mm(&mut o.fillet.d1, 500.0));
+                        ui.add(mm(u, &mut o.fillet.d1, 500.0));
                     }
                     Conic => {
                         ui.label("Size");
-                        ui.add(mm(&mut o.fillet.d1, 500.0));
+                        ui.add(mm(u, &mut o.fillet.d1, 500.0));
                         ui.label("Shape (ρ)");
                         ui.add(egui::Slider::new(&mut o.fillet.rho, 0.05..=0.95));
                     }
                     ChamferEqual => {
                         ui.label("Distance");
-                        ui.add(mm(&mut o.fillet.d1, 500.0));
+                        ui.add(mm(u, &mut o.fillet.d1, 500.0));
                     }
                     ChamferTwo => {
                         ui.label("Distance 1");
-                        ui.add(mm(&mut o.fillet.d1, 500.0));
+                        ui.add(mm(u, &mut o.fillet.d1, 500.0));
                         ui.label("Distance 2");
-                        ui.add(mm(&mut o.fillet.d2, 500.0));
+                        ui.add(mm(u, &mut o.fillet.d2, 500.0));
                     }
                     ChamferAngle => {
                         ui.label("Distance");
-                        ui.add(mm(&mut o.fillet.d1, 500.0));
+                        ui.add(mm(u, &mut o.fillet.d1, 500.0));
                         ui.label("Angle");
                         ui.add(egui::DragValue::new(&mut o.fillet.angle_deg).range(1.0..=89.0).suffix("°"));
                     }
@@ -622,8 +624,8 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
     });
 }
 
-fn mm(v: &mut f64, max: f64) -> egui::DragValue<'_> {
-    egui::DragValue::new(v).range(0.0..=max).speed(0.1).suffix(" mm")
+fn mm(u: crate::settings::Units, v: &mut f64, max: f64) -> egui::DragValue<'_> {
+    u.len(v, 0.0, max, 0.1)
 }
 
 fn image_quick_adjust(ui: &mut Ui, app: &mut App, i: usize) {

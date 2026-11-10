@@ -122,11 +122,11 @@ pub fn y_to_a(gcode: &str) -> String {
 }
 
 /// Problems worth telling the user before a rotary job.
-pub fn warnings(doc: &Document, r: &RotarySettings) -> Vec<String> {
+pub fn warnings(doc: &Document, r: &RotarySettings, u: crate::settings::Units) -> Vec<String> {
     let mut w = Vec::new();
     let b = doc.bbox();
     if !b.is_empty() && b.height() > r.circumference() + 1e-6 {
-        w.push(format!("The design is {:.1} mm tall but the object is only {:.1} mm around: it would overlap itself.", b.height(), r.circumference()));
+        w.push(format!("The design is {} {s} tall but the object is only {} {s} around: it would overlap itself.", crate::geom::fmt_num(u.round(b.height())), crate::geom::fmt_num(u.round(r.circumference())), s = u.suffix()));
     }
     if r.units_per_turn <= 0.0 {
         w.push("Set how far the rotary axis moves for one turn (Rotary window).".into());
@@ -165,7 +165,7 @@ mod tests {
         assert!((b.center().y - 60.0).abs() < 1e-6, "turns about the design's middle");
         assert_eq!(y_to_a("G0 X1.000 Y2.000\nG1 X3 Y4 S100\n; Y5 comment\nM5\n"), "G0 X1.000 A2.000\nG1 X3 A4 S100\n; Y5 comment\nM5\n");
         // 40 mm tall fits around a 57.3 mm object (180 mm around), but not around a 10 mm one (31.4 mm)
-        assert!(warnings(&doc, &r).is_empty());
-        assert_eq!(warnings(&doc, &RotarySettings { object_diameter: 10.0, ..r }).len(), 1);
+        assert!(warnings(&doc, &r, crate::settings::Units::Mm).is_empty());
+        assert_eq!(warnings(&doc, &RotarySettings { object_diameter: 10.0, ..r }, crate::settings::Units::Mm).len(), 1);
     }
 }

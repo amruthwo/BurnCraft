@@ -49,6 +49,28 @@ impl Units {
         let k = 10f64.powi(self.decimals());
         (mm * self.factor() * k).round() / k
     }
+    /// A number box for a length stored in mm, shown and typed in these
+    /// units. `lo..=hi` and `speed` are in mm, like the value.
+    pub fn len<'a>(self, mm: &'a mut f64, lo: f64, hi: f64, speed: f64) -> egui::DragValue<'a> {
+        self.drag(mm, lo, hi, speed, self.suffix())
+    }
+    /// The same for a speed stored in mm/s (shown as in/s in inches).
+    pub fn speed<'a>(self, mm_s: &'a mut f64, lo: f64, hi: f64, speed: f64) -> egui::DragValue<'a> {
+        self.drag(mm_s, lo, hi, speed, if self == Units::Mm { "mm/s" } else { "in/s" })
+    }
+    fn drag<'a>(self, v: &'a mut f64, lo: f64, hi: f64, speed: f64, unit: &str) -> egui::DragValue<'a> {
+        let f = self.factor();
+        egui::DragValue::from_get_set(move |n| {
+            if let Some(n) = n {
+                *v = n / f;
+            }
+            *v * f
+        })
+        .range(lo * f..=hi * f)
+        .speed(speed * f)
+        .max_decimals(if self == Units::Mm { 2 } else { 4 })
+        .suffix(format!(" {unit}"))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +117,8 @@ pub struct Settings {
     pub camera: crate::camera::CameraSettings,
     /// Ask GitHub for a newer version when BurnCraft starts.
     pub check_updates: bool,
+    /// Nest options (spacing, margin, rotations…).
+    pub nest: crate::nest::NestSettings,
     pub selection_cad_style: bool,
     /// Layer settings applied to layers of new projects.
     pub layer_defaults: Vec<crate::model::CutSetting>,
@@ -178,6 +202,7 @@ impl Default for Settings {
             tour_done: false,
             camera: Default::default(),
             check_updates: true,
+            nest: Default::default(),
             selection_cad_style: true,
             layer_defaults: Vec::new(),
             pinned: ["Save", "Undo", "Redo", "ToolSelect", "ToolLine", "ToolRect", "ToolEllipse", "ToolText", "TraceImage", "Preview", "LaserStart"].iter().map(|s| s.to_string()).collect(),
@@ -250,6 +275,7 @@ impl Settings {
             "tour_done": self.tour_done,
             "camera": serde_json::to_value(&self.camera).unwrap_or(Value::Null),
             "check_updates": self.check_updates,
+            "nest": serde_json::to_value(&self.nest).unwrap_or(Value::Null),
             "selection_cad_style": self.selection_cad_style,
             "layer_defaults": self.layer_defaults_xml(),
             "pinned": self.pinned,
@@ -327,6 +353,9 @@ impl Settings {
             s.camera = c;
         }
         s.check_updates = b(v, "check_updates").unwrap_or(s.check_updates);
+        if let Some(n) = v.get("nest").and_then(|n| serde_json::from_value(n.clone()).ok()) {
+            s.nest = n;
+        }
         s.selection_cad_style = b(v, "selection_cad_style").unwrap_or(true);
         if let Some(x) = v.get("layer_defaults").and_then(|x| x.as_str()) {
             if let Ok(root) = crate::xml::parse(x) {

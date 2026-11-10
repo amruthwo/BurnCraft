@@ -23,6 +23,7 @@ mod k40;
 mod laser;
 mod lbrn;
 mod mcp;
+mod nest;
 mod nodes;
 mod model;
 mod ops;
@@ -85,6 +86,10 @@ impl Root {
             app.current_layer = 1;
             // BURNCRAFT_TOUR=<step> shows that tour step, BURNCRAFT_HELP=<topic> the Help window
             app.tour = std::env::var("BURNCRAFT_TOUR").ok().and_then(|v| v.parse().ok());
+            // BURNCRAFT_UNITS=in shows the screenshot in inches
+            if std::env::var("BURNCRAFT_UNITS").is_ok_and(|v| v == "in") {
+                app.settings.units = settings::Units::Inch;
+            }
             // BURNCRAFT_WIN=vartext / camera opens that window in the screenshot
             match std::env::var("BURNCRAFT_WIN").unwrap_or_default().as_str() {
                 "vartext" => {
@@ -98,6 +103,16 @@ impl Root {
                     app.settings.device.rotary.enabled = true;
                 }
                 "settings" => app.win_settings = true,
+                "nest" => {
+                    // nest the demo's shapes on the work area and show the preview
+                    app.win_nest = true;
+                    app.sel = (0..app.doc.shapes.len()).collect();
+                    let set = crate::nest::NestSettings { time_limit: 0.5, ..Default::default() };
+                    if let Ok(job) = crate::nest::prepare(&app.doc, &app.sel, app.settings.device.width, app.settings.device.height, &set) {
+                        let r = crate::nest::run(&job, &std::sync::atomic::AtomicBool::new(false), &|_| {});
+                        app.nest_result = Some((r, app.rev));
+                    }
+                }
                 "galvo" => {
                     app.settings.device.controller = gcode::Controller::EzCad2;
                     app.win_settings = true;
@@ -160,6 +175,11 @@ impl Root {
                 continue;
             }
             if typing || app.win_search {
+                continue;
+            }
+            // C closes the line or pen shape being drawn (instead of its usual shortcut)
+            if key == Key::C && !modifiers.command && !modifiers.ctrl && !modifiers.alt && !modifiers.shift && (repeat || canvas::close_drawing(app)) && matches!(app.tool, app::Tool::Line | app::Tool::Pen) {
+                ctx.input_mut(|i| i.consume_key(modifiers, key));
                 continue;
             }
             let arrow = matches!(key, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown);
@@ -425,6 +445,16 @@ impl eframe::App for Root {
             }
         } else if app.net_job.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        // a nest finished?
+        let nested = app.nest_job.as_ref().and_then(|j| j.result.lock().ok().and_then(|mut g| g.take()).map(|r| (r, j.rev)));
+        if let Some(done) = nested {
+            app.nest_job = None;
+            if app.win_nest {
+                app.nest_result = Some(done);
+            }
+        } else if app.nest_job.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
         // update checker: announce a newer version once, keep redrawing while it works
         #[cfg(not(target_arch = "wasm32"))]

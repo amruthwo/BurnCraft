@@ -16,7 +16,7 @@ pub enum Icon {
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
     Pen, Arc, Star, Trim, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
-    Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary,
+    Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary, Nest,
 }
 
 pub struct Pal {
@@ -643,6 +643,14 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             rf(rect_at(0.12, 0.43, 0.6, 0.61), pal.soft);
             line(&[(0.66, 0.2), (0.92, 0.2)], ac);
             line(&[(0.79, 0.2), (0.79, 0.62)], ac);
+        }
+        Icon::Nest => {
+            // a sheet with parts packed into it: a rectangle, a triangle and a circle
+            rs(rect_at(0.1, 0.12, 0.9, 0.88), st);
+            rf(rect_at(0.17, 0.2, 0.47, 0.42), pal.soft);
+            closed(&[(0.53, 0.2), (0.83, 0.2), (0.53, 0.52)], pal.soft, ac);
+            circ(0.3, 0.65, 0.14, ac);
+            closed(&[(0.83, 0.3), (0.83, 0.8), (0.52, 0.8)], Color32::TRANSPARENT, thin);
         }
         Icon::Rotary => {
             // a cylinder lying on two rollers, with a turning arrow

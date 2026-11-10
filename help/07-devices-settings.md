@@ -59,7 +59,7 @@ Settings → **About BurnCraft** shows the version, how this copy was installed 
 
 ## Other settings
 
-- Theme, interface size, units (mm or inches), grid spacing.
+- Theme, interface size, units (mm or inches), grid spacing. With inches chosen, every size, distance and speed in BurnCraft is shown and typed in inches (speeds in in/s). Projects are still saved in mm, so they open the same for everyone.
 - Ribbon labels and the compact two-row ribbon.
 - Cut optimization (see Layers and burning).
 - AI provider for AI Outline.

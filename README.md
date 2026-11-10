@@ -49,6 +49,9 @@ with **Preview** and **Frame** at low power before burning it for real.
   line/curve, insert, break, delete (LightBurn keys S C L I M B D).
 * Modify: weld, union, subtract, intersect (with a live preview on hover), offset (inward/outward/both,
   round/bevel/sharp, simplify, outer shapes only), grid and circular arrays, align, distribute.
+* Nest: pack the selected shapes tightly onto the work area or into any closed shape (an offcut, avoiding its
+  holes), with spacing, margin, allowed rotations, optional mirroring and parts in holes, copies or fill-the-sheet,
+  and a time limit; previewed with the material used before you apply it.
 * Images: brightness/contrast/gamma, dithering, tracing (precise or smooth curves via VTracer) with a live preview,
   magic wand and (magnetic) lasso selections that become outlines.
 * Optional AI outlines with the tool of your choice: Claude, any OpenAI-compatible service (OpenAI, Ollama,

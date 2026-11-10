@@ -25,6 +25,7 @@ pub fn all(ctx: &Context, app: &mut App, run: &mut Vec<Action>) {
     vartext(ctx, app);
     camera(ctx, app);
     rotary(ctx, app);
+    nest(ctx, app);
     toasts(ctx, app);
 }
 
@@ -150,7 +151,9 @@ fn settings(ctx: &Context, app: &mut App) {
     let mut save = false;
     let mut retheme = false;
     let mut replay = false;
-    egui::Window::new("Settings").open(&mut open).default_width(460.0).show(ctx, |ui| {
+    let u = app.settings.units;
+    // scrolls when it's taller than the screen (small laptop screens)
+    egui::Window::new("Settings").open(&mut open).default_width(460.0).default_height(ctx.content_rect().height() - 120.0).vscroll(true).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Getting started").strong());
             replay = ui.button("Replay Welcome Tour").on_hover_text("Walk through the window again, step by step").clicked();
@@ -189,7 +192,7 @@ fn settings(ctx: &Context, app: &mut App) {
             });
             ui.end_row();
             ui.label("Grid spacing");
-            save |= ui.add(egui::DragValue::new(&mut app.settings.grid_step).range(1.0..=100.0).suffix(" mm")).changed();
+            save |= ui.add(u.len(&mut app.settings.grid_step, 1.0, 100.0, 0.1)).changed();
             ui.end_row();
         });
         ui.separator();
@@ -263,7 +266,7 @@ fn settings(ctx: &Context, app: &mut App) {
                 });
                 ui.end_row();
                 ui.label("Lens field");
-                if ui.add(egui::DragValue::new(&mut g.lens).range(10.0..=600.0).speed(0.5).suffix(" mm")).on_hover_text("The size marked on the lens, e.g. 110 mm; it's also the work area").changed() {
+                if ui.add(u.len(&mut g.lens, 10.0, 600.0, 0.5)).on_hover_text("The size marked on the lens, e.g. 110 mm; it's also the work area").changed() {
                     d.width = g.lens;
                     d.height = g.lens;
                     save = true;
@@ -299,15 +302,15 @@ fn settings(ctx: &Context, app: &mut App) {
                 });
                 ui.end_row();
                 ui.label("Travel speed");
-                save |= ui.add(egui::DragValue::new(&mut g.jump_speed).range(10.0..=20000.0).speed(10.0).suffix(" mm/s")).changed();
+                save |= ui.add(u.speed(&mut g.jump_speed, 10.0, 20000.0, 10.0)).changed();
                 ui.end_row();
                 ui.label("Red pointer speed");
-                save |= ui.add(egui::DragValue::new(&mut g.light_speed).range(10.0..=20000.0).speed(10.0).suffix(" mm/s")).changed();
+                save |= ui.add(u.speed(&mut g.light_speed, 10.0, 20000.0, 10.0)).changed();
                 ui.end_row();
                 ui.label("Red pointer offset");
                 ui.horizontal(|ui| {
-                    save |= ui.add(egui::DragValue::new(&mut g.light_offset_x).range(-20.0..=20.0).speed(0.05).prefix("X ").suffix(" mm")).changed();
-                    save |= ui.add(egui::DragValue::new(&mut g.light_offset_y).range(-20.0..=20.0).speed(0.05).prefix("Y ").suffix(" mm")).changed();
+                    save |= ui.add(u.len(&mut g.light_offset_x, -20.0, 20.0, 0.05).prefix("X ")).changed();
+                    save |= ui.add(u.len(&mut g.light_offset_y, -20.0, 20.0, 0.05).prefix("Y ")).changed();
                 })
                 .response
                 .on_hover_text("If the framed outline sits beside a test mark, enter how far it needs to move");
@@ -360,9 +363,9 @@ fn settings(ctx: &Context, app: &mut App) {
             }
             ui.label("Work area");
             ui.horizontal(|ui| {
-                save |= ui.add(egui::DragValue::new(&mut d.width).range(10.0..=5000.0).suffix(" mm")).changed();
+                save |= ui.add(u.len(&mut d.width, 10.0, 5000.0, 1.0)).changed();
                 ui.label("×");
-                save |= ui.add(egui::DragValue::new(&mut d.height).range(10.0..=5000.0).suffix(" mm")).changed();
+                save |= ui.add(u.len(&mut d.height, 10.0, 5000.0, 1.0)).changed();
             });
             ui.end_row();
             if d.controller.family() != crate::gcode::Family::GCode {
@@ -372,7 +375,7 @@ fn settings(ctx: &Context, app: &mut App) {
             save |= ui.add(egui::DragValue::new(&mut d.s_max).range(1.0..=100000.0)).on_hover_text("GRBL $30 — usually 1000").changed();
             ui.end_row();
             ui.label("Travel speed");
-            save |= ui.add(egui::DragValue::new(&mut d.rapid_speed).range(1.0..=2000.0).suffix(" mm/s")).changed();
+            save |= ui.add(u.speed(&mut d.rapid_speed, 1.0, 2000.0, 1.0)).changed();
             ui.end_row();
             ui.label("Power mode");
             save |= ui.add_enabled(d.controller.has_dynamic(), egui::Checkbox::new(&mut d.dynamic_power, "Dynamic (M4) — lower power in corners")).changed();
@@ -776,6 +779,7 @@ fn array(ctx: &Context, app: &mut App) {
     if !app.win_array {
         return;
     }
+    let u = app.settings.units;
     let mut open = true;
     let mut go = false;
     let editing = app.array_edit.is_some();
@@ -805,13 +809,13 @@ fn array(ctx: &Context, app: &mut App) {
             let off = |c2c: bool, size: f64| if c2c { size } else { 0.0 };
             ui.label("X Spacing");
             let mut sx = *gx + off(*c2c, bw);
-            if ui.add(egui::DragValue::new(&mut sx).speed(0.5).suffix(" mm")).changed() {
+            if ui.add(u.len(&mut sx, -100000.0, 100000.0, 0.5)).changed() {
                 *gx = sx - off(*c2c, bw);
             }
             ui.end_row();
             ui.label("Y Spacing");
             let mut sy = *gy + off(*c2c, bh);
-            if ui.add(egui::DragValue::new(&mut sy).speed(0.5).suffix(" mm")).changed() {
+            if ui.add(u.len(&mut sy, -100000.0, 100000.0, 0.5)).changed() {
                 *gy = sy - off(*c2c, bh);
             }
             ui.end_row();
@@ -819,7 +823,7 @@ fn array(ctx: &Context, app: &mut App) {
         // "Total Size: %1 %3 x %2 %3  (Count: %4)"
         let tw = *c as f64 * bw + (*c as f64 - 1.0).max(0.0) * *gx;
         let th = *r as f64 * bh + (*r as f64 - 1.0).max(0.0) * *gy;
-        ui.label(RichText::new(format!("Total Size: {} mm x {} mm  (Count: {})", fmt_num((tw * 100.0).round() / 100.0), fmt_num((th * 100.0).round() / 100.0), *c * *r)).size(11.5));
+        ui.label(RichText::new(format!("Total Size: {} {u2} x {} {u2}  (Count: {})", fmt_num(u.round(tw)), fmt_num(u.round(th)), *c * *r, u2 = u.suffix())).size(11.5));
         go = ui.button(if editing { "Update array" } else { "Make copies" }).clicked();
     });
     if go && (editing || !app.sel.is_empty()) {
@@ -841,6 +845,7 @@ fn offset(ctx: &Context, app: &mut App) {
     }
     use crate::ops::{OffsetDir, OffsetJoin};
     let now = ctx.input(|i| i.time);
+    let u = app.settings.units;
     let mut open = true;
     let mut go = false;
     let before = app.offset_opts;
@@ -848,7 +853,7 @@ fn offset(ctx: &Context, app: &mut App) {
         let o = &mut app.offset_opts;
         egui::Grid::new("off").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
             ui.label("Distance");
-            ui.add(egui::DragValue::new(&mut o.dist).speed(crate::ops::OffsetOpts::DIST_STEP * 0.1).range(0.0..=crate::ops::OffsetOpts::MAX_DIST).max_decimals(2).suffix(" mm")).on_hover_text("How far the generated offset curve will be from the source shapes");
+            ui.add(u.len(&mut o.dist, 0.0, crate::ops::OffsetOpts::MAX_DIST, crate::ops::OffsetOpts::DIST_STEP * 0.1)).on_hover_text("How far the generated offset curve will be from the source shapes");
             ui.end_row();
             ui.label("Direction");
             ui.horizontal(|ui| {
@@ -878,7 +883,7 @@ fn offset(ctx: &Context, app: &mut App) {
             ui.end_row();
             if o.optimize {
                 ui.label("Tolerance");
-                ui.add(egui::DragValue::new(&mut o.simplify).range(0.0..=crate::ops::OffsetOpts::MAX_TOL).speed(crate::ops::OffsetOpts::TOL_STEP).max_decimals(4).suffix(" mm"));
+                ui.add(u.len(&mut o.simplify, 0.0, crate::ops::OffsetOpts::MAX_TOL, crate::ops::OffsetOpts::TOL_STEP).max_decimals(5));
                 ui.end_row();
             }
         });
@@ -918,6 +923,7 @@ fn circular(ctx: &Context, app: &mut App) {
     if !app.win_circular {
         return;
     }
+    let u = app.settings.units;
     let mut open = true;
     let mut go = false;
     let editing = app.array_edit.is_some();
@@ -931,10 +937,10 @@ fn circular(ctx: &Context, app: &mut App) {
             ui.add(egui::DragValue::new(span).range(-360.0..=360.0).suffix("°")).on_hover_text("360° spreads the copies evenly all the way round");
             ui.end_row();
             ui.label("Centre X");
-            ui.add(egui::DragValue::new(&mut center.x).speed(0.5).suffix(" mm"));
+            ui.add(u.len(&mut center.x, -100000.0, 100000.0, 0.5));
             ui.end_row();
             ui.label("Centre Y");
-            ui.add(egui::DragValue::new(&mut center.y).speed(0.5).suffix(" mm"));
+            ui.add(u.len(&mut center.y, -100000.0, 100000.0, 0.5));
             ui.end_row();
             ui.label("Rotate copies");
             ui.checkbox(rotate, "").on_hover_text("Turn each copy to face the centre, like spokes");
@@ -974,6 +980,7 @@ fn along_curve(ctx: &Context, app: &mut App) {
     if !app.win_curve {
         return;
     }
+    let u = app.settings.units;
     let mut open = true;
     let mut go = false;
     let title = if app.curve_dlg.0 { "Align to Path" } else { "Pattern on Path" };
@@ -990,7 +997,7 @@ fn along_curve(ctx: &Context, app: &mut App) {
                 ui.add_enabled(!pc.by_spacing, egui::DragValue::new(&mut pc.copies).range(1..=crate::sketch::PATH_COPIES_MAX));
                 ui.end_row();
                 ui.radio_value(&mut pc.by_spacing, true, "Space Between Copies");
-                ui.add_enabled(pc.by_spacing, egui::DragValue::new(&mut pc.spacing).range(crate::sketch::PATH_SPACING_MIN..=crate::sketch::PATH_SPACING_MAX).speed(0.5).suffix(" mm"));
+                ui.add_enabled(pc.by_spacing, u.len(&mut pc.spacing, crate::sketch::PATH_SPACING_MIN, crate::sketch::PATH_SPACING_MAX, 0.5));
                 ui.end_row();
                 ui.label("Rotate Copies");
                 ui.checkbox(&mut pc.rotate, "").on_hover_text("Turn each copy by how much the path has turned since the start");
@@ -1046,6 +1053,7 @@ fn barcode(ctx: &Context, app: &mut App) {
         return;
     }
     use crate::barcode::{encode, outlines, Kind};
+    let u = app.settings.units;
     let mut open = true;
     let mut add = false;
     egui::Window::new("Barcode / QR Code").open(&mut open).default_width(360.0).show(ctx, |ui| {
@@ -1059,11 +1067,11 @@ fn barcode(ctx: &Context, app: &mut App) {
         ui.add(egui::TextEdit::singleline(&mut st.text).desired_width(f32::INFINITY));
         egui::Grid::new("bc").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
             ui.label("Width");
-            ui.add(egui::DragValue::new(&mut st.width).range(5.0..=500.0).speed(0.5).suffix(" mm"));
+            ui.add(u.len(&mut st.width, 5.0, 500.0, 0.5));
             ui.end_row();
             if !st.kind.is_2d() {
                 ui.label("Bar height");
-                ui.add(egui::DragValue::new(&mut st.height).range(2.0..=300.0).speed(0.5).suffix(" mm"));
+                ui.add(u.len(&mut st.height, 2.0, 300.0, 0.5));
                 ui.end_row();
                 ui.label("Digits/text under bars");
                 ui.checkbox(&mut st.human_text, "");
@@ -1092,7 +1100,7 @@ fn barcode(ctx: &Context, app: &mut App) {
                     let r = egui::Rect::from_min_size(tl, vec2((lb.width() * scale) as f32, (lb.height() * scale) as f32));
                     p.rect_filled(r, 0.0, if st.invert { Color32::from_rgb(235, 225, 200) } else { Color32::BLACK });
                 }
-                ui.label(RichText::new(format!("{} modules · {} rectangles · {:.1} × {:.1} mm", if st.kind.is_2d() { format!("{}×{}", m.w, m.h) } else { m.w.to_string() }, lines.len(), b.width(), b.height())).size(11.0));
+                ui.label(RichText::new(format!("{} modules · {} rectangles · {} × {} {}", if st.kind.is_2d() { format!("{}×{}", m.w, m.h) } else { m.w.to_string() }, lines.len(), fmt_num(u.round(b.width())), fmt_num(u.round(b.height())), u.suffix())).size(11.0));
                 add = ui.add(egui::Button::new(RichText::new("Add to project").strong()).fill(ACCENT.gamma_multiply(0.8))).clicked();
             }
             Err(e) => {
@@ -1155,17 +1163,147 @@ fn toasts(ctx: &Context, app: &mut App) {
 #[allow(dead_code)]
 fn _unused(_: P2) {}
 
+/// Nest: options, run / stop, then preview with Apply / Cancel.
+fn nest(ctx: &Context, app: &mut App) {
+    use crate::nest::{Rotations, SheetChoice};
+    if !app.win_nest {
+        return;
+    }
+    let u = app.settings.units;
+    let mut open = true;
+    let (mut save, mut start, mut apply, mut cancel, mut stop) = (false, false, false, false, false);
+    let now = ctx.input(|i| i.time);
+    let running = app.nest_job.is_some();
+    let progress = app.nest_job.as_ref().map(|j| j.progress.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0);
+    let stale = app.nest_result.as_ref().map(|(_, rev)| *rev != app.rev).unwrap_or(false);
+    let n_sel = app.sel.len();
+    egui::Window::new("Nest").open(&mut open).default_width(440.0).show(ctx, |ui| {
+        ui.label(RichText::new("Select the shapes to nest. To nest into another shape (an offcut, or a rectangle you drew), select it last and choose \u{201c}Last selected shape\u{201d}.").size(11.5).weak());
+        let s = &mut app.settings.nest;
+        egui::Grid::new("nest").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+            ui.label("Sheet");
+            ui.horizontal(|ui| {
+                save |= ui.selectable_value(&mut s.sheet, SheetChoice::WorkArea, "Work area").changed();
+                save |= ui.selectable_value(&mut s.sheet, SheetChoice::LastSelected, "Last selected shape").on_hover_text("It stays where it is; its holes are avoided").changed();
+            });
+            ui.end_row();
+            ui.label("Spacing");
+            save |= ui.add(u.len(&mut s.spacing, 0.0, 100.0, 0.1)).on_hover_text("The smallest gap between two parts").changed();
+            ui.end_row();
+            ui.label("Margin");
+            save |= ui.add(u.len(&mut s.margin, 0.0, 100.0, 0.1)).on_hover_text("The smallest gap from the sheet's edge").changed();
+            ui.end_row();
+            ui.label("Rotations");
+            ui.horizontal(|ui| {
+                save |= ui.selectable_value(&mut s.rotations, Rotations::None, "None").changed();
+                save |= ui.selectable_value(&mut s.rotations, Rotations::Quarter, "90° steps").changed();
+                save |= ui.selectable_value(&mut s.rotations, Rotations::Every, "Every").changed();
+                if s.rotations == Rotations::Every {
+                    save |= ui.add(egui::DragValue::new(&mut s.step).range(1.0..=180.0).suffix("°")).changed();
+                }
+            });
+            ui.end_row();
+            ui.label("Mirroring");
+            save |= ui.checkbox(&mut s.mirror, "Allowed").on_hover_text("Parts may be flipped over (not for engraving one side only!)").changed();
+            ui.end_row();
+            ui.label("Holes");
+            save |= ui.checkbox(&mut s.in_holes, "Small parts may go inside bigger parts' holes").changed();
+            ui.end_row();
+            ui.label("Copies");
+            ui.horizontal(|ui| {
+                save |= ui.add_enabled(!s.fill, egui::DragValue::new(&mut s.copies).range(1..=500)).on_hover_text("How many of each selected part").changed();
+                save |= ui.checkbox(&mut s.fill, "Fill the sheet with as many as fit").changed();
+            });
+            ui.end_row();
+            ui.label("Precision");
+            ui.horizontal(|ui| {
+                save |= ui.selectable_value(&mut s.fine, false, "Normal").changed();
+                save |= ui.selectable_value(&mut s.fine, true, "Fine").on_hover_text("Tighter, slower").changed();
+            });
+            ui.end_row();
+            ui.label("Time limit");
+            save |= ui.add(egui::DragValue::new(&mut s.time_limit).range(0.0..=600.0).speed(0.5).suffix(" s")).on_hover_text("Other orders are tried until then; the best layout is kept").changed();
+            ui.end_row();
+        });
+        ui.separator();
+        if running {
+            ui.horizontal(|ui| {
+                ui.add(egui::ProgressBar::new(progress.unwrap_or(0.0)).desired_width(280.0).text("Nesting…"));
+                stop = ui.button("Stop").on_hover_text("Keep the best layout so far").clicked();
+            });
+        } else {
+            ui.horizontal(|ui| {
+                start = ui.add_enabled(n_sel > 0, egui::Button::new(RichText::new("Nest").strong())).on_disabled_hover_text("Select the shapes to nest first").clicked();
+                ui.label(RichText::new(format!("{n_sel} shape(s) selected")).weak());
+            });
+        }
+        if let Some((r, _)) = &app.nest_result {
+            let mut text = format!("{} part(s) placed · {:.0}% of the sheet used · best of {} layout(s)", r.placed.len(), r.usage(), r.attempts);
+            if r.not_placed > 0 {
+                text.push_str(&format!(" · {} didn't fit", r.not_placed));
+            }
+            ui.label(RichText::new(text).strong());
+            if stale {
+                ui.colored_label(Color32::from_rgb(230, 150, 60), "The design changed since: nest again.");
+            }
+            ui.label(RichText::new("The new positions are shown on the canvas.").size(11.0).weak());
+            ui.horizontal(|ui| {
+                apply = ui.add_enabled(!stale && !r.placed.is_empty(), egui::Button::new("Apply")).clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        }
+    });
+    if save {
+        app.save_settings(now);
+    }
+    if stop {
+        if let Some(j) = &app.nest_job {
+            j.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    if start {
+        let dev = &app.settings.device;
+        match crate::nest::prepare(&app.doc, &app.sel, dev.width, dev.height, &app.settings.nest) {
+            Ok(job) => {
+                app.nest_result = None;
+                app.nest_job = Some(crate::nest::running::start(job, app.rev));
+            }
+            Err(e) => app.error(e, now),
+        }
+    }
+    if apply {
+        if let Some((r, _)) = app.nest_result.take() {
+            app.checkpoint();
+            let sel = crate::nest::apply(&mut app.doc, &r);
+            app.sel = sel;
+            app.touch();
+            app.toast(format!("Nested {} part(s)", r.placed.len()), now);
+        }
+    }
+    if cancel {
+        app.nest_result = None;
+    }
+    if !open {
+        app.win_nest = false;
+        app.nest_result = None;
+        if let Some(j) = &app.nest_job {
+            j.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
 /// Rotary setup: kind, axis, travel per turn and diameters.
 fn rotary(ctx: &Context, app: &mut App) {
     use crate::rotary::{RotaryAxis, RotaryKind};
     if !app.win_rotary {
         return;
     }
+    let u = app.settings.units;
     let mut open = true;
     let mut save = false;
     let galvo = app.settings.device.controller == crate::gcode::Controller::EzCad2;
     let gcode = app.settings.device.controller.family() == crate::gcode::Family::GCode;
-    let warnings = crate::rotary::warnings(&app.doc, &app.settings.device.rotary);
+    let warnings = crate::rotary::warnings(&app.doc, &app.settings.device.rotary, app.settings.units);
     egui::Window::new("Rotary").open(&mut open).default_width(460.0).show(ctx, |ui| {
         let r = &mut app.settings.device.rotary;
         save |= ui.checkbox(&mut r.enabled, RichText::new("Use the rotary for jobs").strong()).changed();
@@ -1187,22 +1325,27 @@ fn rotary(ctx: &Context, app: &mut App) {
             });
             ui.end_row();
             ui.label("Travel per turn");
-            let unit = if r.axis == RotaryAxis::A { " units" } else { " mm" };
+            // a Y axis moves in mm (shown in the chosen units); an A axis in its own units
+            let field = if r.axis == RotaryAxis::A {
+                egui::DragValue::new(&mut r.units_per_turn).range(0.1..=100000.0).speed(0.5).suffix(" units")
+            } else {
+                u.len(&mut r.units_per_turn, 0.1, 100000.0, 0.5)
+            };
             save |= ui
-                .add(egui::DragValue::new(&mut r.units_per_turn).range(0.1..=100000.0).speed(0.5).suffix(unit))
+                .add(field)
                 .on_hover_text("How far the axis moves for one full turn of the roller or chuck. Mark it, jog until it has turned exactly once, and read the distance (an A axis set up in degrees: 360)")
                 .changed();
             ui.end_row();
             if r.kind == RotaryKind::Roller {
                 ui.label("Roller diameter");
-                save |= ui.add(egui::DragValue::new(&mut r.roller_diameter).range(1.0..=500.0).speed(0.1).suffix(" mm")).on_hover_text("The roller that drives the object").changed();
+                save |= ui.add(u.len(&mut r.roller_diameter, 1.0, 500.0, 0.1)).on_hover_text("The roller that drives the object").changed();
                 ui.end_row();
             }
             ui.label("Object diameter");
-            save |= ui.add(egui::DragValue::new(&mut r.object_diameter).range(1.0..=2000.0).speed(0.1).suffix(" mm")).changed();
+            save |= ui.add(u.len(&mut r.object_diameter, 1.0, 2000.0, 0.1)).changed();
             ui.end_row();
             ui.label("Around the object");
-            ui.label(format!("{:.1} mm (the tallest the design can be)", r.circumference()));
+            ui.label(format!("{} {} (the tallest the design can be)", fmt_num(u.round(r.circumference())), u.suffix()));
             ui.end_row();
             ui.label("Direction");
             save |= ui.checkbox(&mut r.reverse, "Turn the other way").on_hover_text("If burns come out upside down").changed();
@@ -1442,6 +1585,7 @@ fn camera(ctx: &Context, app: &mut App) {
     if !app.win_camera {
         return;
     }
+    let u = app.settings.units;
     let mut open = true;
     let mut save = false;
     let mut start: Option<String> = None;
@@ -1557,8 +1701,8 @@ fn camera(ctx: &Context, app: &mut App) {
             egui::Grid::new("cam_bed").num_columns(3).show(ui, |ui| {
                 for k in 0..4 {
                     ui.label(format!("{} ({})", k + 1, names[k]));
-                    save |= ui.add(egui::DragValue::new(&mut b[k][0]).speed(0.5).prefix("X ").suffix(" mm")).changed();
-                    save |= ui.add(egui::DragValue::new(&mut b[k][1]).speed(0.5).prefix("Y ").suffix(" mm")).changed();
+                    save |= ui.add(u.len(&mut b[k][0], -100000.0, 100000.0, 0.5).prefix("X ")).changed();
+                    save |= ui.add(u.len(&mut b[k][1], -100000.0, 100000.0, 0.5).prefix("Y ")).changed();
                     ui.end_row();
                 }
             });

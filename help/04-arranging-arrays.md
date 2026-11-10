@@ -10,6 +10,21 @@
 
 Align, distribute, centre on the bed, bring to front or send to back, group and ungroup — in the Arrange tab.
 
+## Nest
+
+**Arrange > Nest** moves and turns the selected shapes so they fit tightly together, to save material.
+
+- **Sheet**: pack onto the **work area**, or into **another shape** — an offcut you traced, or a rectangle you drew. Select that shape last and choose *Last selected shape*. It stays where it is, and its holes are avoided.
+- **Spacing**: the smallest gap between two parts. **Margin**: the smallest gap from the sheet's edge. Allow for the laser's kerf.
+- **Rotations**: none, 90° steps, or every so many degrees. More angles can pack tighter but take longer.
+- **Mirroring**: allows flipping parts over (off by default — leave it off if the material has a good side).
+- **Holes**: lets small parts go inside the holes of bigger ones (off by default).
+- **Copies**: nests that many of each part. **Fill the sheet** keeps adding copies until nothing more fits.
+- **Precision**: *Fine* follows the outlines more closely; it's slower.
+- **Time limit**: BurnCraft tries many orders and keeps the best layout it finds. **Stop** keeps the best layout found so far.
+
+The result is previewed on the bed with how much of the sheet is used. **Apply** moves the shapes (one Undo puts them back); **Cancel** leaves everything as it was. Grouped shapes move together as one part. Parts that don't fit are left where they were.
+
 ## Mirror
 
 - **Flip Horizontal / Vertical** mirror the selection in place.

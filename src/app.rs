@@ -144,7 +144,7 @@ impl Tool {
         match self {
             Tool::Select => "Click to select · drag left-to-right: shapes fully inside · right-to-left: anything touched · Shift/Ctrl adds",
             Tool::Pan => "Drag to move the view · scroll to zoom",
-            Tool::Line => "Click to add points · rest on the last point to switch the next segment to an arc · Shift locks horizontal / 45° / vertical · double-click or Enter finishes · click the first point to close",
+            Tool::Line => "Click to add points · rest on the last point to switch the next segment to an arc · Shift locks horizontal / 45° / vertical · double-click or Enter finishes · click the first point or press C to close",
             Tool::Relate => "Click nodes, lines or circles (one or two), then pick a relation above · click a relation tag to remove it",
             Tool::MirrorLine => "Click a straight edge or construction line to mirror the selection about it",
             Tool::Rect => "Drag to draw · Shift = square · Ctrl = from centre",
@@ -153,7 +153,7 @@ impl Tool {
             Tool::Text => "Click where the text should go, then type in Properties",
             Tool::Nodes => "Drag points to reshape · double-click a point to remove it",
             Tool::Measure => "Drag to measure distance and angle",
-            Tool::Pen => "Click for a sharp point · click-and-drag for a smooth curve · Shift snaps angles · Enter or double-click finishes · click the first point to close",
+            Tool::Pen => "Click for a sharp point · click-and-drag for a smooth curve · Shift snaps angles · Enter or double-click finishes · click the first point or press C to close",
             Tool::Arc => "3-point: click start, end, then a point on the arc · Centre: click centre, start, end · Tangent: continue from a line end",
             Tool::Star => "Drag to draw · Ctrl = from centre · set points and depth in the options bar",
             Tool::Trim => "Click the piece of a line to cut away, up to where it crosses other lines",
@@ -375,6 +375,15 @@ pub struct App {
     /// A newer version was found by the check at start-up and already announced.
     pub update_announced: bool,
     pub win_rotary: bool,
+    pub win_nest: bool,
+    /// A nest being worked out.
+    pub nest_job: Option<crate::nest::running::Running>,
+    /// The nest result being previewed, and the document revision it was made for.
+    pub nest_result: Option<(crate::nest::NestResult, u64)>,
+    /// Renaming a shape in the Shapes list: its id and the text being typed.
+    pub rename: Option<(u64, String)>,
+    /// A second click on a selected row starts renaming after a pause, like a file manager: row and when.
+    pub rename_click: Option<(usize, f64)>,
 }
 
 /// What a chosen file is for (the browser hands files over later, so the purpose travels with it).
@@ -501,6 +510,11 @@ impl App {
             update: std::sync::Arc::new(std::sync::Mutex::new(crate::update::State::Idle)),
             update_announced: false,
             win_rotary: false,
+            win_nest: false,
+            rename: None,
+            rename_click: None,
+            nest_job: None,
+            nest_result: None,
         }
     }
 
@@ -818,7 +832,7 @@ impl App {
                 self.save_settings(now);
                 self.touch();
                 let more = if devs.len() > 1 { format!(" ({} more in the file)", devs.len() - 1) } else { String::new() };
-                self.toast(format!("Laser set up: {} · {} × {} mm{more}", self.settings.device.name, fmt_num(self.settings.device.width), fmt_num(self.settings.device.height)), now);
+                self.toast(format!("Laser set up: {} · {} × {} {}{more}", self.settings.device.name, fmt_num(self.settings.units.round(self.settings.device.width)), fmt_num(self.settings.units.round(self.settings.device.height)), self.settings.units.suffix()), now);
                 for n in notes {
                     self.warnings.push(n);
                 }
@@ -1551,7 +1565,7 @@ impl App {
                 let job = self.machine_job();
                 if self.rotary_on() {
                     let now2 = now;
-                    for w in crate::rotary::warnings(&self.doc, &self.settings.device.rotary) {
+                    for w in crate::rotary::warnings(&self.doc, &self.settings.device.rotary, self.settings.units) {
                         self.error(w, now2);
                     }
                 }
@@ -1694,6 +1708,7 @@ impl App {
             Action::VariableText => self.win_vartext = !self.win_vartext,
             Action::Camera => self.win_camera = !self.win_camera,
             Action::Rotary => self.win_rotary = !self.win_rotary,
+            Action::Nest => self.win_nest = true,
             Action::WelcomeTour => {
                 self.win_settings = false;
                 self.win_help = false;

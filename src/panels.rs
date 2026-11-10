@@ -41,6 +41,11 @@ pub fn left_panel(ui: &mut Ui, app: &mut App) {
     // only the rows on screen are built, so a project with thousands of shapes stays quick
     let row_h = ui.spacing().interact_size.y.max(18.0);
     let n = app.doc.shapes.len();
+    let now = ui.input(|i| i.time);
+    // renaming: (shape index, new name; empty = back to the usual name)
+    let mut renamed: Option<(usize, String)> = None;
+    let mut start_rename: Option<usize> = None;
+    let only_selected = if app.sel.len() == 1 { app.sel.first().copied() } else { None };
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_h, n, |ui, rows| {
         for i in rows {
             let s = &app.doc.shapes[i];
@@ -48,16 +53,70 @@ pub fn left_panel(ui: &mut Ui, app: &mut App) {
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
                 ui.painter().circle_filled(r.center(), 5.0, display_color(s.layer, ui.visuals().dark_mode));
-                let resp = ui.selectable_label(selected, format!("{}  ·  {}", s.display_name(), layer_name(s.layer)));
-                if resp.clicked() {
-                    select = Some((i, ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl)));
+                // the name turns into a text box: Enter or clicking elsewhere keeps it, Escape cancels
+                if let Some((_, buf)) = app.rename.as_mut().filter(|(id, _)| *id == s.id) {
+                    let te = ui.add(egui::TextEdit::singleline(buf).desired_width(150.0).hint_text(s.display_name()));
+                    if !te.has_focus() && !te.lost_focus() {
+                        te.request_focus();
+                    }
+                    if ui.input(|k| k.key_pressed(egui::Key::Escape)) {
+                        app.rename = None;
+                    } else if te.lost_focus() {
+                        renamed = Some((i, buf.trim().to_string()));
+                    }
+                    return;
                 }
+                let resp = ui.selectable_label(selected, format!("{}  ·  {}", s.display_name(), layer_name(s.layer))).on_hover_text("Right-click to rename, or click a selected name again and wait");
+                if resp.clicked() {
+                    let adding = ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
+                    select = Some((i, adding));
+                    // a second, slower click on the selected row renames it (like a file manager)
+                    app.rename_click = if !adding && only_selected == Some(i) { Some((i, now + 0.5)) } else { None };
+                }
+                if resp.double_clicked() {
+                    // a quick double-click isn't a rename
+                    app.rename_click = None;
+                }
+                resp.context_menu(|ui| {
+                    if ui.button("Rename…").clicked() {
+                        start_rename = Some(i);
+                        ui.close();
+                    }
+                    if ui.add_enabled(!s.name.is_empty(), egui::Button::new("Use the usual name")).on_hover_text("Forget the name you gave it").clicked() {
+                        renamed = Some((i, String::new()));
+                        ui.close();
+                    }
+                });
                 if icon_button(ui, if s.locked { Icon::Lock } else { Icon::Unlock }, 14.0).on_hover_text("Lock / unlock (locked shapes can't move)").clicked() {
                     toggle_lock = Some(i);
                 }
             });
         }
     });
+    if let Some((i, t)) = app.rename_click {
+        if app.sel != [i] || app.rename.is_some() {
+            app.rename_click = None;
+        } else if now >= t {
+            app.rename_click = None;
+            start_rename = Some(i);
+        } else {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(t - now));
+        }
+    }
+    if let Some(i) = start_rename {
+        if let Some(s) = app.doc.shapes.get(i) {
+            app.rename = Some((s.id, s.name.clone()));
+            app.sel = vec![i];
+        }
+    }
+    if let Some((i, name)) = renamed {
+        app.rename = None;
+        if app.doc.shapes.get(i).is_some_and(|s| s.name != name) {
+            app.checkpoint();
+            app.doc.shapes[i].name = name;
+            app.touch();
+        }
+    }
     if let Some((i, add)) = select {
         if add {
             if let Some(p) = app.sel.iter().position(|x| *x == i) {
@@ -144,6 +203,7 @@ fn layers(ui: &mut Ui, app: &mut App) {
             ui.label(RichText::new(format!("{} settings", layer_name(idx))).strong());
         });
         let before = app.doc.cut(idx).cloned();
+        let u = app.settings.units;
         let c = app.doc.cut_mut(idx);
         egui::Grid::new("cut_edit").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
             ui.label("Name");
@@ -157,7 +217,7 @@ fn layers(ui: &mut Ui, app: &mut App) {
             });
             ui.end_row();
             ui.label("Speed");
-            ui.add(egui::DragValue::new(&mut c.speed).range(0.1..=2000.0).speed(1.0).suffix(" mm/s"));
+            ui.add(u.speed(&mut c.speed, 0.1, 2000.0, 1.0));
             ui.end_row();
             ui.label("Max power");
             ui.add(egui::Slider::new(&mut c.max_power, 0.0..=100.0).suffix(" %"));
@@ -170,7 +230,7 @@ fn layers(ui: &mut Ui, app: &mut App) {
             ui.end_row();
             if matches!(c.mode, CutMode::Fill | CutMode::FillLine | CutMode::OffsetFill | CutMode::Image) {
                 ui.label("Line interval");
-                ui.add(egui::DragValue::new(&mut c.interval).range(0.01..=5.0).speed(0.005).suffix(" mm"));
+                ui.add(u.len(&mut c.interval, 0.01, 5.0, 0.005).max_decimals(if u == crate::settings::Units::Mm { 3 } else { 5 }));
                 ui.end_row();
                 ui.label("");
                 ui.label(RichText::new(format!("≈ {:.0} lines per inch", 25.4 / c.interval.max(0.001))).size(11.0));
@@ -341,7 +401,7 @@ fn properties(ui: &mut Ui, app: &mut App) {
         ShapeKind::Rect { cr, w, h } => {
             ui.horizontal(|ui| {
                 ui.label("Corner radius");
-                changed |= ui.add(egui::DragValue::new(cr).range(0.0..=w.min(*h) / 2.0).speed(0.2).suffix(" mm")).changed();
+                changed |= ui.add(u.len(cr, 0.0, w.min(*h) / 2.0, 0.2)).changed();
             });
         }
         ShapeKind::Polygon { n, .. } => {
@@ -400,10 +460,10 @@ fn properties(ui: &mut Ui, app: &mut App) {
             }
             egui::Grid::new("textopts").num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
                 ui.label("Height");
-                redraw |= ui.add(egui::DragValue::new(height).range(0.5..=500.0).speed(0.2).suffix(" mm")).changed();
+                redraw |= ui.add(u.len(height, 0.5, 500.0, 0.2)).changed();
                 ui.end_row();
                 ui.label("Letter spacing");
-                redraw |= ui.add(egui::DragValue::new(&mut style.letter_spacing).range(-50.0..=200.0).speed(0.1).suffix(" mm")).changed();
+                redraw |= ui.add(u.len(&mut style.letter_spacing, -50.0, 200.0, 0.1)).changed();
                 ui.end_row();
                 ui.label("Case");
                 egui::ComboBox::from_id_salt("textcase").selected_text(style.case.label()).show_ui(ui, |ui| {
@@ -512,8 +572,8 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
         if let Some(job) = &app.job {
             ui.label(RichText::new("Preview").strong());
             // same summary as LightBurn's preview window
-            ui.label(format!("Cut distance: {:.0} mm (~{})", job.cut_length, fmt_time(job.cut_seconds)));
-            ui.label(format!("Rapid moves: {:.0} mm (~{})", job.travel_length, fmt_time(job.travel_seconds)));
+            ui.label(format!("Cut distance: {} (~{})", long_len(app.settings.units, job.cut_length), fmt_time(job.cut_seconds)));
+            ui.label(format!("Rapid moves: {} (~{})", long_len(app.settings.units, job.travel_length), fmt_time(job.travel_seconds)));
             ui.label(RichText::new(format!("Total time estimated: {}", fmt_time(job.seconds))).strong());
             if job.skipped_outside > 0 {
                 ui.label(RichText::new(format!("{} shape(s) outside the bed are left out of the job.", job.skipped_outside)).color(Color32::from_rgb(235, 90, 80)));
@@ -557,7 +617,7 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
         return;
     }
     if dev.controller == crate::gcode::Controller::EzCad2 {
-        ui.label(format!("{} galvo, {} mm lens, over USB", dev.galvo.source.label(), crate::geom::fmt_num(dev.galvo.lens)));
+        ui.label(format!("{} galvo, {} {} lens, over USB", dev.galvo.source.label(), crate::geom::fmt_num(app.settings.units.round(dev.galvo.lens)), app.settings.units.suffix()));
         #[cfg(not(usb_lasers))]
         ui.colored_label(egui::Color32::from_rgb(230, 150, 60), "USB lasers aren't supported on this system yet.");
         #[cfg(usb_lasers)]
@@ -940,4 +1000,12 @@ fn num_field(ui: &mut Ui, id: &str, v: &mut f64, step: f64, suffix: &str, min: O
         busy |= resp.dragged();
     });
     busy
+}
+
+/// A long distance (a job's cut length) in the chosen units, whole mm or inches to one decimal.
+fn long_len(u: crate::settings::Units, mm: f64) -> String {
+    match u {
+        crate::settings::Units::Mm => format!("{mm:.0} mm"),
+        crate::settings::Units::Inch => format!("{:.1} in", mm / 25.4),
+    }
 }

@@ -120,6 +120,7 @@ actions! {
     VariableText: "Variable Text", VarText, "Laser", "Fill text from a .csv / .txt file, a serial number or the date, a new row each job", [], [];
     Camera: "Camera", Camera, "Laser", "Show the laser's camera picture on the bed, and line it up", [], [];
     Rotary: "Rotary", Rotary, "Laser", "Burn around cylinders with a roller or chuck rotary", [], [];
+    Nest: "Nest", Nest, "Arrange", "Move and rotate the selected shapes to fit tightly on the work area or another shape", [], [];
     NewTab: "New Tab", NewTab, "File", "Open an empty project in a new tab", ["Ctrl+Shift+N"], ["Ctrl+Shift+N"];
     DuplicateTab: "Duplicate Tab", DuplicateTab, "File", "Copy this project into a new tab", [], [];
     CloseTab: "Close Tab", CloseTab, "File", "Close this project tab", ["Ctrl+F4"], ["Ctrl+F4"];

@@ -6,7 +6,7 @@ BurnCraft designs, traces and burns laser jobs, and opens LightBurn projects (.l
 
 - **Ribbon** (top): commands grouped by task — Home, Sketch, Modify, Arrange, Image, Laser, View.
 - **Quick-access bar** (top middle): drag any ribbon button up here to pin it. Right-click a button to pin or unpin.
-- **Shapes list** (left): every shape in the project. The top of the list burns first.
+- **Shapes list** (left): every shape in the project. The top of the list burns first. To rename a shape, right-click it and choose **Rename…**, or click a selected name again and wait a moment. Enter keeps the name; Escape cancels.
 - **Canvas** (middle): the laser bed. The origin (0, 0) is the front-left corner.
 - **Side panels** (right): Layers, Properties of the selection, and Laser (connect, move, start).
 - **Bottom bar**: the colour palette (one colour per layer), Smart guides and Grid snap switches, zoom and cursor position.
