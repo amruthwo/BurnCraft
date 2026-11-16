@@ -161,6 +161,7 @@ fn settings(ctx: &Context, app: &mut App) {
                 app.win_help = true;
             }
         });
+        save |= ui.checkbox(&mut app.settings.show_welcome, "Show the welcome window at start").on_hover_text("The card in the middle of an empty project, with Open, Import and a sample project").changed();
         ui.separator();
         save |= about_ui(ui, app);
         ui.separator();
@@ -181,6 +182,14 @@ fn settings(ctx: &Context, app: &mut App) {
             ui.end_row();
             ui.label("Ribbon labels");
             save |= ui.checkbox(&mut app.settings.ribbon_labels, "Show text under icons").changed();
+            ui.end_row();
+            ui.label("Title bar");
+            if ui.checkbox(&mut app.settings.system_title_bar, "Use the system title bar").on_hover_text("Off: the window buttons sit on BurnCraft's tab row, saving space. On: the usual title bar (if the window misbehaves without it).").changed() {
+                save = true;
+                if !cfg!(target_os = "macos") {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(app.settings.system_title_bar));
+                }
+            }
             ui.end_row();
             ui.label("Ribbon layout");
             save |= ui.checkbox(&mut app.settings.ribbon_compact, "Compact: two rows of small buttons (CAD-style)").changed();
@@ -317,14 +326,14 @@ fn settings(ctx: &Context, app: &mut App) {
                 ui.end_row();
                 ui.label("Delays (µs)");
                 ui.horizontal(|ui| {
-                    save |= ui.add(egui::DragValue::new(&mut g.delay_on).range(-5000.0..=5000.0).prefix("on ")).changed();
-                    save |= ui.add(egui::DragValue::new(&mut g.delay_off).range(-5000.0..=5000.0).prefix("off ")).changed();
-                    save |= ui.add(egui::DragValue::new(&mut g.delay_polygon).range(0.0..=5000.0).prefix("corner ")).changed();
-                    save |= ui.add(egui::DragValue::new(&mut g.delay_end).range(0.0..=100000.0).prefix("end ")).changed();
+                    save |= ui.add(crate::settings::num(&mut g.delay_on).range(-5000.0..=5000.0).prefix("on ")).changed();
+                    save |= ui.add(crate::settings::num(&mut g.delay_off).range(-5000.0..=5000.0).prefix("off ")).changed();
+                    save |= ui.add(crate::settings::num(&mut g.delay_polygon).range(0.0..=5000.0).prefix("corner ")).changed();
+                    save |= ui.add(crate::settings::num(&mut g.delay_end).range(0.0..=100000.0).prefix("end ")).changed();
                 });
                 ui.end_row();
                 ui.label("Default frequency");
-                save |= ui.add(egui::DragValue::new(&mut g.frequency).range(1.0..=4000.0).suffix(" kHz")).on_hover_text("Used for layers whose frequency is 0").changed();
+                save |= ui.add(crate::settings::num(&mut g.frequency).range(1.0..=4000.0).suffix(" kHz")).on_hover_text("Used for layers whose frequency is 0").changed();
                 ui.end_row();
                 if g.source == crate::galvo::Source::Fiber {
                     ui.label("MOPA pulse width");
@@ -335,7 +344,7 @@ fn settings(ctx: &Context, app: &mut App) {
                             save = true;
                         }
                         if let Some(pw) = &mut g.pulse_width {
-                            save |= ui.add(egui::DragValue::new(pw).range(1..=500)).changed();
+                            save |= ui.add(crate::settings::num(pw).range(1..=500)).changed();
                         }
                     });
                     ui.end_row();
@@ -372,7 +381,7 @@ fn settings(ctx: &Context, app: &mut App) {
                 return;
             }
             ui.label("Max S value");
-            save |= ui.add(egui::DragValue::new(&mut d.s_max).range(1.0..=100000.0)).on_hover_text("GRBL $30 — usually 1000").changed();
+            save |= ui.add(crate::settings::num(&mut d.s_max).range(1.0..=100000.0)).on_hover_text("GRBL $30 — usually 1000").changed();
             ui.end_row();
             ui.label("Travel speed");
             save |= ui.add(u.speed(&mut d.rapid_speed, 1.0, 2000.0, 1.0)).changed();
@@ -801,10 +810,10 @@ fn array(ctx: &Context, app: &mut App) {
         });
         egui::Grid::new("arr").num_columns(2).show(ui, |ui| {
             ui.label("X Columns");
-            ui.add(egui::DragValue::new(c).range(1..=100));
+            ui.add(crate::settings::num(c).range(1..=100));
             ui.end_row();
             ui.label("Y Rows");
-            ui.add(egui::DragValue::new(r).range(1..=100));
+            ui.add(crate::settings::num(r).range(1..=100));
             ui.end_row();
             let off = |c2c: bool, size: f64| if c2c { size } else { 0.0 };
             ui.label("X Spacing");
@@ -931,10 +940,10 @@ fn circular(ctx: &Context, app: &mut App) {
         let (count, span, rotate, center) = &mut app.circular;
         egui::Grid::new("circ").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
             ui.label("Copies (total)");
-            ui.add(egui::DragValue::new(count).range(2..=360));
+            ui.add(crate::settings::num(count).range(2..=360));
             ui.end_row();
             ui.label("Angle");
-            ui.add(egui::DragValue::new(span).range(-360.0..=360.0).suffix("°")).on_hover_text("360° spreads the copies evenly all the way round");
+            ui.add(crate::settings::num(span).range(-360.0..=360.0).suffix("°")).on_hover_text("360° spreads the copies evenly all the way round");
             ui.end_row();
             ui.label("Centre X");
             ui.add(u.len(&mut center.x, -100000.0, 100000.0, 0.5));
@@ -994,7 +1003,7 @@ fn along_curve(ctx: &Context, app: &mut App) {
         egui::Grid::new("curve").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
             if !*align {
                 ui.radio_value(&mut pc.by_spacing, false, "Number of Copies");
-                ui.add_enabled(!pc.by_spacing, egui::DragValue::new(&mut pc.copies).range(1..=crate::sketch::PATH_COPIES_MAX));
+                ui.add_enabled(!pc.by_spacing, crate::settings::num(&mut pc.copies).range(1..=crate::sketch::PATH_COPIES_MAX));
                 ui.end_row();
                 ui.radio_value(&mut pc.by_spacing, true, "Space Between Copies");
                 ui.add_enabled(pc.by_spacing, u.len(&mut pc.spacing, crate::sketch::PATH_SPACING_MIN, crate::sketch::PATH_SPACING_MAX, 0.5));
@@ -1003,7 +1012,7 @@ fn along_curve(ctx: &Context, app: &mut App) {
                 ui.checkbox(&mut pc.rotate, "").on_hover_text("Turn each copy by how much the path has turned since the start");
                 ui.end_row();
                 ui.checkbox(&mut pc.scale, "Scale Copies");
-                ui.add_enabled(pc.scale, egui::DragValue::new(&mut pc.scale_pct).range(1.0..=2000.0).suffix(" %")).on_hover_text("Size of the last copy; the ones between grow or shrink evenly");
+                ui.add_enabled(pc.scale, crate::settings::num(&mut pc.scale_pct).range(1.0..=2000.0).suffix(" %")).on_hover_text("Size of the last copy; the ones between grow or shrink evenly");
                 ui.end_row();
             } else {
                 ui.label("Follow the curve");
@@ -1174,7 +1183,7 @@ fn nest(ctx: &Context, app: &mut App) {
     let (mut save, mut start, mut apply, mut cancel, mut stop) = (false, false, false, false, false);
     let now = ctx.input(|i| i.time);
     let running = app.nest_job.is_some();
-    let progress = app.nest_job.as_ref().map(|j| j.progress.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0);
+    let progress = app.nest_job.as_ref().map(|j| (j.progress(), j.stopping()));
     let stale = app.nest_result.as_ref().map(|(_, rev)| *rev != app.rev).unwrap_or(false);
     let n_sel = app.sel.len();
     egui::Window::new("Nest").open(&mut open).default_width(440.0).show(ctx, |ui| {
@@ -1199,7 +1208,7 @@ fn nest(ctx: &Context, app: &mut App) {
                 save |= ui.selectable_value(&mut s.rotations, Rotations::Quarter, "90° steps").changed();
                 save |= ui.selectable_value(&mut s.rotations, Rotations::Every, "Every").changed();
                 if s.rotations == Rotations::Every {
-                    save |= ui.add(egui::DragValue::new(&mut s.step).range(1.0..=180.0).suffix("°")).changed();
+                    save |= ui.add(crate::settings::num(&mut s.step).range(1.0..=180.0).suffix("°")).changed();
                 }
             });
             ui.end_row();
@@ -1211,7 +1220,7 @@ fn nest(ctx: &Context, app: &mut App) {
             ui.end_row();
             ui.label("Copies");
             ui.horizontal(|ui| {
-                save |= ui.add_enabled(!s.fill, egui::DragValue::new(&mut s.copies).range(1..=500)).on_hover_text("How many of each selected part").changed();
+                save |= ui.add_enabled(!s.fill, crate::settings::num(&mut s.copies).range(1..=500)).on_hover_text("How many of each selected part").changed();
                 save |= ui.checkbox(&mut s.fill, "Fill the sheet with as many as fit").changed();
             });
             ui.end_row();
@@ -1222,14 +1231,27 @@ fn nest(ctx: &Context, app: &mut App) {
             });
             ui.end_row();
             ui.label("Time limit");
-            save |= ui.add(egui::DragValue::new(&mut s.time_limit).range(0.0..=600.0).speed(0.5).suffix(" s")).on_hover_text("Other orders are tried until then; the best layout is kept").changed();
+            save |= ui.add(crate::settings::num(&mut s.time_limit).range(0.0..=600.0).speed(0.5).suffix(" s")).on_hover_text("Other orders are tried until then; the best layout is kept").changed();
             ui.end_row();
         });
+        if s.variant_count() > crate::nest::MANY_VARIANTS {
+            ui.colored_label(Color32::from_rgb(230, 150, 60), format!("Each part is tried {} ways: nesting will be slow. Larger rotation steps (or no mirroring) are much quicker.", s.variant_count()));
+        }
         ui.separator();
         if running {
             ui.horizontal(|ui| {
-                ui.add(egui::ProgressBar::new(progress.unwrap_or(0.0)).desired_width(280.0).text("Nesting…"));
-                stop = ui.button("Stop").on_hover_text("Keep the best layout so far").clicked();
+                let (p, stopping) = progress.unwrap_or_default();
+                let (frac, text) = if stopping {
+                    (1.0, "Stopping…".to_string())
+                } else if let Some(k) = p.preparing {
+                    (k as f32 / 1000.0, "Preparing the shapes…".to_string())
+                } else if app.settings.nest.fill {
+                    (1.0, format!("Filling · {} layout(s) tried", p.attempts))
+                } else {
+                    (p.placed as f32 / 1000.0, format!("Layout {} · {}% of the parts placed", p.attempts + 1, p.placed / 10))
+                };
+                ui.add(egui::ProgressBar::new(frac).desired_width(280.0).text(text));
+                stop = ui.add_enabled(!stopping, egui::Button::new("Stop")).on_hover_text("Keep the best layout so far").clicked();
             });
         } else {
             ui.horizontal(|ui| {
@@ -1243,6 +1265,9 @@ fn nest(ctx: &Context, app: &mut App) {
                 text.push_str(&format!(" · {} didn't fit", r.not_placed));
             }
             ui.label(RichText::new(text).strong());
+            if r.partial {
+                ui.colored_label(Color32::from_rgb(230, 150, 60), "Time ran out before a whole layout was finished: this one is part-done. Allow more time, larger rotation steps or Normal precision.");
+            }
             if stale {
                 ui.colored_label(Color32::from_rgb(230, 150, 60), "The design changed since: nest again.");
             }
@@ -1327,7 +1352,7 @@ fn rotary(ctx: &Context, app: &mut App) {
             ui.label("Travel per turn");
             // a Y axis moves in mm (shown in the chosen units); an A axis in its own units
             let field = if r.axis == RotaryAxis::A {
-                egui::DragValue::new(&mut r.units_per_turn).range(0.1..=100000.0).speed(0.5).suffix(" units")
+                crate::settings::num(&mut r.units_per_turn).range(0.1..=100000.0).speed(0.5).suffix(" units")
             } else {
                 u.len(&mut r.units_per_turn, 0.1, 100000.0, 0.5)
             };
@@ -1477,7 +1502,7 @@ fn vartext(ctx: &Context, app: &mut App) {
                 changed = true;
             }
             let mut r = v.row + 1;
-            if ui.add_enabled(n > 0, egui::DragValue::new(&mut r).range(1..=n.max(1))).changed() {
+            if ui.add_enabled(n > 0, crate::settings::num(&mut r).range(1..=n.max(1))).changed() {
                 v.row = r.saturating_sub(1).min(n.saturating_sub(1));
                 changed = true;
             }
@@ -1518,11 +1543,11 @@ fn vartext(ctx: &Context, app: &mut App) {
         ui.separator();
         ui.horizontal(|ui| {
             ui.label("Serial number");
-            changed |= ui.add(egui::DragValue::new(&mut v.serial)).changed();
+            changed |= ui.add(crate::settings::num(&mut v.serial)).changed();
             ui.label("step");
-            changed |= ui.add(egui::DragValue::new(&mut v.serial_step)).changed();
+            changed |= ui.add(crate::settings::num(&mut v.serial_step)).changed();
             ui.label("digits");
-            changed |= ui.add(egui::DragValue::new(&mut v.serial_digits).range(0..=12)).on_hover_text("Pad with zeros, e.g. 4 → 0007").changed();
+            changed |= ui.add(crate::settings::num(&mut v.serial_digits).range(0..=12)).on_hover_text("Pad with zeros, e.g. 4 → 0007").changed();
         });
         changed |= ui.checkbox(&mut v.advance, "Move to the next row and serial number after each job is started").changed();
         ui.separator();
@@ -1625,7 +1650,7 @@ fn camera(ctx: &Context, app: &mut App) {
             }
             if app.settings.camera.source.starts_with("url:") {
                 ui.label("every");
-                save |= ui.add(egui::DragValue::new(&mut app.settings.camera.interval).range(0.2..=60.0).suffix(" s")).changed();
+                save |= ui.add(crate::settings::num(&mut app.settings.camera.interval).range(0.2..=60.0).suffix(" s")).changed();
             }
         });
         if let Some(e) = &app.camera_error {

@@ -14,7 +14,7 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
     use Action::*;
     match tab {
         RibbonTab::Home => vec![
-            ("Project", vec![New, Open, Save, Import]),
+            ("Project", vec![New, Open, Save, SaveAs, Import]),
             ("Clipboard", vec![Paste, Copy, Cut, Duplicate, Delete]),
             ("Draw", vec![ToolSelect, ToolLine, ToolRect, ToolEllipse, ToolText]),
             ("Arrange", vec![Group, Ungroup, PageCenter]),
@@ -293,9 +293,27 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
     let c = theme::colors(ui.visuals().dark_mode);
     let narrow = ui.available_width() < 900.0;
     app.hover_action = None;
-    // tab row
+    // tab row (also the window's title row, unless the system title bar is used)
+    let own_bar = own_title_bar(app);
+    let mac = cfg!(target_os = "macos");
+    if own_bar {
+        // empty space drags the window; double-click maximises (added first, so the buttons on it win)
+        let row = Rect::from_min_size(ui.max_rect().min - vec2(8.0, 4.0), vec2(ui.max_rect().width() + 16.0, 34.0));
+        let r = ui.interact(row, egui::Id::unique("title_row"), Sense::click_and_drag());
+        if r.drag_started_by(egui::PointerButton::Primary) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        if r.double_clicked() {
+            let max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+        }
+    }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
+        if own_bar && mac {
+            // room for the window buttons macOS draws at the top left
+            ui.add_space(70.0);
+        }
         let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
         let logo = logo_texture(ui.ctx());
         ui.painter().image(logo.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
@@ -321,11 +339,15 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
         }
         app.ui_rects.insert("ribbon_tabs", tabs_rect);
         let left_end = ui.cursor().left();
-        let right_w = if narrow { 240.0 } else { 140.0 };
+        let right_w = if narrow { 240.0 } else { 140.0 } + if own_bar && !mac { 3.0 * 38.0 + 8.0 } else { 0.0 };
         let right_start = ui.max_rect().right() - right_w;
         app.ui_rects.insert("quick_bar", Rect::from_x_y_ranges(left_end..=right_start, (row_y - 15.0)..=(row_y + 15.0)));
         quick_bar(ui, app, row_y, left_end, right_start, &mut run);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if own_bar && !mac {
+                window_buttons(ui);
+                ui.add_space(8.0);
+            }
             let mut icons_rect = Rect::NOTHING;
             for a in [Action::Settings, Action::Help, Action::Shortcuts, Action::CommandSearch] {
                 if small_icon_button(ui, app, a, 18.0) {
@@ -465,17 +487,17 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
             }
             Tool::Polygon => {
                 ui.label("Sides");
-                ui.add(egui::DragValue::new(&mut o.poly_sides).range(3..=crate::sketch::POLYGON_MAX_SIDES));
+                ui.add(crate::settings::num(&mut o.poly_sides).range(3..=crate::sketch::POLYGON_MAX_SIDES));
                 ui.label("Corner radius");
                 ui.add(mm(u, &mut o.poly_radius, 500.0));
             }
             Tool::Star => {
                 ui.label("Points");
-                ui.add(egui::DragValue::new(&mut o.star_points).range(3..=crate::sketch::STAR_MAX_POINTS));
+                ui.add(crate::settings::num(&mut o.star_points).range(3..=crate::sketch::STAR_MAX_POINTS));
                 ui.label("Ratio");
-                ui.add(egui::DragValue::new(&mut o.star_ratio).range(0.05..=1.0).speed(0.05).max_decimals(2));
+                ui.add(crate::settings::num(&mut o.star_ratio).range(0.05..=1.0).speed(0.05).max_decimals(2));
                 ui.label("Bulge");
-                ui.add(egui::DragValue::new(&mut o.star_bulge).range(0.0..=1.0).speed(0.05).max_decimals(2));
+                ui.add(crate::settings::num(&mut o.star_bulge).range(0.0..=1.0).speed(0.05).max_decimals(2));
                 ui.label("Corner radius");
                 ui.add(mm(u, &mut o.star_radius, 200.0));
             }
@@ -525,7 +547,7 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
                         ui.label("Distance");
                         ui.add(mm(u, &mut o.fillet.d1, 500.0));
                         ui.label("Angle");
-                        ui.add(egui::DragValue::new(&mut o.fillet.angle_deg).range(1.0..=89.0).suffix("°"));
+                        ui.add(crate::settings::num(&mut o.fillet.angle_deg).range(1.0..=89.0).suffix("°"));
                     }
                 }
             }
@@ -691,4 +713,91 @@ pub fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
 pub fn window_icon() -> Option<egui::IconData> {
     let i = image::load_from_memory(include_bytes!("../packaging/icons/burncraft-256.png")).ok()?.to_rgba8();
     Some(egui::IconData { width: i.width(), height: i.height(), rgba: i.into_raw() })
+}
+
+/// Is BurnCraft drawing its own title row (desktop, unless "Use the system title bar" is on)?
+pub fn own_title_bar(app: &App) -> bool {
+    !cfg!(target_arch = "wasm32") && !app.settings.system_title_bar
+}
+
+/// Minimise, maximise / restore and close, at the right end of the tab row.
+fn window_buttons(ui: &mut Ui) {
+    let c = theme::colors(ui.visuals().dark_mode);
+    let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+    // right to left: close, maximise, minimise
+    for kind in 0..3 {
+        let (r, resp) = ui.allocate_exact_size(vec2(38.0, 26.0), Sense::click());
+        let hover = resp.hovered();
+        if hover {
+            let fill = if kind == 0 { Color32::from_rgb(200, 40, 50) } else { c.hover };
+            ui.painter().rect_filled(r, 4.0, fill);
+        }
+        let ink = if hover && kind == 0 { Color32::WHITE } else { c.text };
+        let s = Stroke::new(1.2, ink);
+        let m = r.center();
+        let p = ui.painter();
+        match kind {
+            0 => {
+                p.line_segment([m + vec2(-5.0, -5.0), m + vec2(5.0, 5.0)], s);
+                p.line_segment([m + vec2(-5.0, 5.0), m + vec2(5.0, -5.0)], s);
+            }
+            1 if maximized => {
+                p.rect_stroke(Rect::from_center_size(m + vec2(-1.5, 1.5), vec2(8.0, 8.0)), 0.0, s, egui::StrokeKind::Middle);
+                p.line_segment([m + vec2(-2.5, -4.5), m + vec2(5.5, -4.5)], s);
+                p.line_segment([m + vec2(5.5, -4.5), m + vec2(5.5, 3.5)], s);
+            }
+            1 => {
+                p.rect_stroke(Rect::from_center_size(m, vec2(10.0, 10.0)), 0.0, s, egui::StrokeKind::Middle);
+            }
+            _ => {
+                p.line_segment([m + vec2(-5.0, 0.0), m + vec2(5.0, 0.0)], s);
+            }
+        }
+        let tip = ["Close", if maximized { "Restore" } else { "Maximise" }, "Minimise"][kind];
+        if resp.on_hover_text(tip).clicked() {
+            let cmd = match kind {
+                0 => egui::ViewportCommand::Close,
+                1 => egui::ViewportCommand::Maximized(!maximized),
+                _ => egui::ViewportCommand::Minimized(true),
+            };
+            ui.ctx().send_viewport_cmd(cmd);
+        }
+    }
+}
+
+/// Without the system's window frame, the window is resized by dragging its edges (a few pixels wide).
+pub fn edge_resize(ctx: &egui::Context, app: &App) {
+    if !own_title_bar(app) || cfg!(target_os = "macos") {
+        return;
+    }
+    use egui::viewport::ResizeDirection as D;
+    let (maximized, pos, pressed) = ctx.input(|i| (i.viewport().maximized.unwrap_or(false) || i.viewport().fullscreen.unwrap_or(false), i.pointer.hover_pos(), i.pointer.primary_pressed()));
+    let Some(p) = pos else { return };
+    if maximized {
+        return;
+    }
+    let r = ctx.content_rect();
+    let e = 5.0;
+    let (l, rt, t, b) = (p.x - r.left() < e, r.right() - p.x < e, p.y - r.top() < e, r.bottom() - p.y < e);
+    let dir = match (l, rt, t, b) {
+        (true, _, true, _) => D::NorthWest,
+        (_, true, true, _) => D::NorthEast,
+        (true, _, _, true) => D::SouthWest,
+        (_, true, _, true) => D::SouthEast,
+        (true, ..) => D::West,
+        (_, true, ..) => D::East,
+        (_, _, true, _) => D::North,
+        (_, _, _, true) => D::South,
+        _ => return,
+    };
+    let icon = match dir {
+        D::North | D::South => egui::CursorIcon::ResizeVertical,
+        D::East | D::West => egui::CursorIcon::ResizeHorizontal,
+        D::NorthWest | D::SouthEast => egui::CursorIcon::ResizeNwSe,
+        D::NorthEast | D::SouthWest => egui::CursorIcon::ResizeNeSw,
+    };
+    ctx.set_cursor_icon(icon);
+    if pressed {
+        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
+    }
 }

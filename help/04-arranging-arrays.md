@@ -4,7 +4,7 @@
 
 - Click to select; Shift or Ctrl adds. Drag left-to-right to select shapes fully inside the box, right-to-left to select anything touched.
 - Drag the handles to scale, the round handle above to rotate (Shift snaps to 15°). Arrow keys nudge by 1 mm (Shift: 10 mm).
-- Type exact position, size and angle in **Properties**.
+- Type exact position, size and angle in **Properties**. X and Y are the bottom-left corner of the selection by default; click another dot of the small 3 × 3 grid to use the centre or another corner. Sizes change from that point too. Tab moves between the boxes; a typed number is used when you press Enter or Tab, and a comma works as the decimal point.
 
 ## Arrange
 

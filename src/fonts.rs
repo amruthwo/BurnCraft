@@ -59,12 +59,22 @@ impl FontSpec {
     }
 }
 
-/// Load a font for the spec; `None` means "use the built-in font".
-pub fn load(spec: &FontSpec) -> Option<FontArc> {
+/// A loaded font, and whether bold / italic have to be simulated because the family has no such face (or
+/// it's a variable font, which keeps every weight in one file).
+#[derive(Clone)]
+pub struct Loaded {
+    pub font: FontArc,
+    pub fake_bold: bool,
+    pub fake_italic: bool,
+}
+
+/// Load a font for the spec (`None` means "use the built-in font"), saying whether bold / italic need
+/// simulating.
+pub fn load_face(spec: &FontSpec) -> Option<Loaded> {
     if spec.family.is_empty() {
         return None;
     }
-    static CACHE: OnceLock<Mutex<HashMap<FontSpec, Option<FontArc>>>> = OnceLock::new();
+    static CACHE: OnceLock<Mutex<HashMap<FontSpec, Option<Loaded>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(f) = cache.lock().unwrap().get(spec) {
         return f.clone();
@@ -75,9 +85,20 @@ pub fn load(spec: &FontSpec) -> Option<FontArc> {
         style: if spec.italic { fontdb::Style::Italic } else { fontdb::Style::Normal },
         ..Default::default()
     };
-    let font = db().query(&q).and_then(|id| db().with_face_data(id, |data, index| FontVec::try_from_vec_and_index(data.to_vec(), index).ok()).flatten()).map(FontArc::new);
-    cache.lock().unwrap().insert(spec.clone(), font.clone());
-    font
+    let loaded = db().query(&q).and_then(|id| {
+        let face = db().face(id)?;
+        let (weight, style) = (face.weight.0, face.style);
+        let font = db().with_face_data(id, |data, index| FontVec::try_from_vec_and_index(data.to_vec(), index).ok()).flatten().map(FontArc::new)?;
+        Some(Loaded { font, fake_bold: spec.bold && weight < 600, fake_italic: spec.italic && style == fontdb::Style::Normal })
+    });
+    cache.lock().unwrap().insert(spec.clone(), loaded.clone());
+    loaded
+}
+
+/// Bold / italic that will be simulated for this spec (the font has no real face for them).
+pub fn simulated(spec: &FontSpec) -> (bool, bool) {
+    // the built-in font has a single face: both are simulated
+    load_face(spec).map(|l| (l.fake_bold, l.fake_italic)).unwrap_or((spec.bold, spec.italic))
 }
 
 #[cfg(test)]

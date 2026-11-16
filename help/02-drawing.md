@@ -7,7 +7,7 @@
 - **Arcs in a line**: rest the cursor on the last point you placed for a moment — the next segment becomes a tangent arc. Rest again to switch back.
 - **Pen / Curve**: click for sharp points, click-and-drag for smooth curves. Press **C** to close the shape.
 - **Arc**: three-point, centre, or tangent (continue from the end of a line).
-- **Text**: click to place, then type in Properties. Any installed font; bold, italic, case, spacing and welding.
+- **Text**: click to place, then type in Properties. Any installed font; bold, italic, case, spacing and welding. In the font list, ↑ / ↓ try each font on the bed, Enter keeps it and Escape goes back. Fonts without a real bold or italic get a simulated one (marked "simulated").
 - **Barcode / QR**: QR codes, Data Matrix and common 1-D barcodes.
 
 ## Closed shapes

@@ -34,6 +34,10 @@ pub struct Laser {
     pub pos: (f64, f64),
     pub console: VecDeque<String>,
     pub progress: (usize, usize),
+    /// Home ($H) has been sent since connecting, so positions can be trusted.
+    pub homed: bool,
+    /// The "not homed yet" warning was shown for this connection.
+    pub home_warned: bool,
 }
 
 impl Default for Laser {
@@ -50,7 +54,7 @@ impl Laser {
         std::thread::Builder::new().name("laser-io".into()).spawn(move || worker(crx, etx)).ok();
         #[cfg(target_arch = "wasm32")]
         drop((crx, etx));
-        Laser { tx, rx, connected: false, state: "Not connected".into(), pos: (0.0, 0.0), console: VecDeque::new(), progress: (0, 0) }
+        Laser { tx, rx, connected: false, state: "Not connected".into(), pos: (0.0, 0.0), console: VecDeque::new(), progress: (0, 0), homed: false, home_warned: false }
     }
 
     pub fn send(&self, c: Cmd) {
@@ -72,6 +76,8 @@ impl Laser {
             match e {
                 Event::Connected(p) => {
                     self.connected = true;
+                    self.homed = false;
+                    self.home_warned = false;
                     self.state = "Connected".into();
                     self.log(format!("Connected to {p}"));
                 }

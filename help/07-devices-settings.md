@@ -7,6 +7,7 @@ Open **Settings** (gear icon, top right):
 - **Controller**: G-code controllers (GRBL, GRBL-M3, GRBL-LPC, FluidNC, Smoothieware, Marlin, RepRap/Duet, LinuxCNC, custom G-code), K40 lasers with the M2 Nano board, galvo lasers with an EZCad2 / JCZ board, and Ruida DSP controllers. Trocen, TopWisdom, EZCad3 and BSL galvo controllers are listed but not supported yet.
 - **Work area**, **Max S value** (GRBL $30, usually 1000; Marlin 255), travel speed and dynamic power (M4).
 - **Import LightBurn device (.lbdev)**: reads the laser's name, work area and controller from a LightBurn device profile. Opening or dropping an .lbdev file does the same.
+- **Safety:** Frame traces only what Start will burn, and BurnCraft never sends a move outside the work area. Set the work area to your machine's real size. As a second safety net on GRBL lasers, switch on the machine's own soft limits: send `$20=1` in the console, with `$130` and `$131` set to the bed's width and height in mm (homing must be on, `$22=1`). Press **Home** after connecting if your laser has home switches.
 
 **FreeBSD:** everything works except USB lasers (K40 and galvo), which aren't supported there yet. GRBL over serial, Ruida over the network, and saving G-code or K40 .egv files all work.
 
@@ -63,7 +64,8 @@ Settings → **About BurnCraft** shows the version, how this copy was installed 
 - Ribbon labels and the compact two-row ribbon.
 - Cut optimization (see Layers and burning).
 - AI provider for AI Outline.
-- **Replay Welcome Tour** shows the tour again.
+- **Replay Welcome Tour** shows the tour again. **Show the welcome window at start** brings back the card you can hide with "Don't show this again".
+- **Use the system title bar**: off (the default), the window's minimise, maximise and close buttons sit on BurnCraft's tab row: drag empty space there to move the window, double-click it to maximise, drag the edges to resize. Turn it on if your desktop handles that badly.
 
 ## Keyboard shortcuts
 

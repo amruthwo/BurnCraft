@@ -334,7 +334,7 @@ pub struct App {
     pub net_job: Option<std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>>>,
     /// The array being edited (index into doc.arrays), while its dialog is open.
     pub array_edit: Option<usize>,
-    /// The welcome card was dismissed with "Start drawing" (until the next new project).
+    /// The welcome card was dismissed with "Start with an empty design" (until the next new project).
     pub welcome_off: bool,
     /// Welcome Tour step being shown.
     pub tour: Option<usize>,
@@ -944,6 +944,35 @@ impl App {
         job
     }
 
+    /// Send G-code lines to the connected laser, unless a move would leave the work area (then say so and
+    /// send nothing). Every G-code move BurnCraft sends (Frame, Start, jog) goes through here.
+    pub fn send_gcode(&mut self, lines: Vec<String>, now: f64) -> bool {
+        let d = &self.settings.device;
+        let check_y = !(self.rotary_on() && d.rotary.axis == crate::rotary::RotaryAxis::Y);
+        let pos = self.laser.homed.then_some(self.laser.pos);
+        match gcode::check_moves(&lines, d.width, d.height, check_y, pos) {
+            Ok(()) => {
+                self.laser.send(Cmd::Send(lines));
+                true
+            }
+            Err(e) => {
+                self.error(e, now);
+                false
+            }
+        }
+    }
+
+    /// Before Frame or Start: if the laser hasn't been homed since connecting, positions may be wrong. Once
+    /// per connection (many diode lasers have no home switches, so it's a warning, not a stop).
+    fn warn_if_not_homed(&mut self, now: f64) {
+        if self.laser.state.starts_with("Alarm") {
+            self.error("The laser reports an alarm (often: not homed yet). Press Home, or unlock it ($X) in the console, before framing or burning.", now);
+        } else if !self.laser.homed && !self.laser.home_warned {
+            self.laser.home_warned = true;
+            self.toast("The laser hasn't been homed since connecting, so its position may be wrong. Press Home first if it has home switches.", now);
+        }
+    }
+
     pub fn advance_variable_text(&mut self, now: f64) {
         let has = self.doc.shapes.iter().any(|s| matches!(&s.kind, ShapeKind::Text { style, .. } if style.variable));
         if !has || !self.doc.vartext.advance {
@@ -1423,24 +1452,29 @@ impl App {
                 }
             }
             // (K40 and galvo lasers have their own Home and Frame further down)
-            Action::LaserHome if !self.settings.device.controller.is_usb_laser() => self.laser.send(Cmd::Send(vec!["$H".into()])),
+            Action::LaserHome if !self.settings.device.controller.is_usb_laser() => {
+                self.laser.send(Cmd::Send(vec!["$H".into()]));
+                self.laser.homed = true;
+            }
             Action::LaserFrame if !self.settings.device.controller.is_usb_laser() => {
-                // with a rotary, frame where the rotary will actually move
-                let b = if self.rotary_on() { crate::rotary::machine_doc(&self.doc, &self.settings.device.rotary, self.settings.device.height).bbox() } else { self.doc.bbox() };
-                if b.is_empty() {
-                    return;
-                }
                 if !self.laser.connected {
                     self.toast("Connect to a laser first (Laser panel).", now);
                     return;
                 }
-                let f = self.settings.device.rapid_speed * 60.0;
-                let pts = [b.min, p2(b.max.x, b.min.y), b.max, p2(b.min.x, b.max.y), b.min];
-                let mut lines = vec!["G90".to_string(), "G21".to_string()];
-                for p in pts {
-                    lines.push(format!("G1 X{:.3} Y{:.3} F{:.0} S0", p.x, p.y, f));
+                // frame exactly what Start would burn (shapes off the bed, hidden layers and construction lines
+                // are left out; with a rotary, where the rotary will actually move)
+                let job = self.machine_job();
+                let Some(mut lines) = gcode::frame_gcode(&job, self.settings.device.rapid_speed) else {
+                    self.job = Some(job);
+                    self.error("Nothing to frame: no layer with Burn switched on has shapes inside the bed.", now);
+                    return;
+                };
+                if self.rotary_on() && self.settings.device.rotary.axis == crate::rotary::RotaryAxis::A {
+                    lines = lines.iter().map(|l| crate::rotary::y_to_a(l).trim_end().to_string()).collect();
                 }
-                self.laser.send(Cmd::Send(lines));
+                self.job = Some(job);
+                self.warn_if_not_homed(now);
+                self.send_gcode(lines, now);
             }
             #[cfg(not(usb_lasers))]
             Action::LaserStart | Action::LaserFrame | Action::LaserHome | Action::LaserStop if matches!(self.settings.device.controller, gcode::Controller::EzCad2 | gcode::Controller::K40Nano) => {
@@ -1579,7 +1613,11 @@ impl App {
                 if job.skipped_outside > 0 {
                     self.error(format!("{} shape(s) outside the bed are left out of this job.", job.skipped_outside), now);
                 }
-                self.laser.send(Cmd::Send(job.gcode.lines().map(|l| l.to_string()).collect()));
+                self.warn_if_not_homed(now);
+                if !self.send_gcode(job.gcode.lines().map(|l| l.to_string()).collect(), now) {
+                    self.job = Some(job);
+                    return;
+                }
                 self.toast(format!("Job started — about {}", fmt_time(job.seconds)), now);
                 self.job_started = Some(now);
                 self.job_estimate = job.seconds;

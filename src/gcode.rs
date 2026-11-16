@@ -597,6 +597,104 @@ pub fn fill_segments(rings: &[Vec<P2>], interval: f64, angle_deg: f64) -> Vec<Ve
     rows
 }
 
+/// G-code that traces the outline of what a job burns (the bounds of its moves with the laser on), laser
+/// off. None if nothing would burn.
+pub fn frame_gcode(job: &Job, rapid_speed: f64) -> Option<Vec<String>> {
+    let mut b = BBox::EMPTY;
+    for m in job.moves.iter().filter(|m| m.power > 0.0) {
+        b.add(m.from);
+        b.add(m.to);
+    }
+    if b.is_empty() {
+        return None;
+    }
+    let f = rapid_speed * 60.0;
+    let pts = [b.min, p2(b.max.x, b.min.y), b.max, p2(b.min.x, b.max.y), b.min];
+    let mut lines = vec!["G90".to_string(), "G21".to_string()];
+    for p in pts {
+        lines.push(format!("G1 X{:.3} Y{:.3} F{:.0} S0", p.x, p.y, f));
+    }
+    Some(lines)
+}
+
+/// Safety check before any G-code is sent to a laser: would a move go outside the work area
+/// (`0..=w` × `0..=h`)? Absolute moves (G90, the default) are checked as they are. Relative moves (G91, or a
+/// `$J=G91` jog) are checked from `pos`, the head's last known position, and only refused when they take the
+/// head further outside (so it can always be jogged back in). `check_y` is false when a rotary turns
+/// instead of Y. Inches (G20) are understood.
+pub fn check_moves(lines: &[String], w: f64, h: f64, check_y: bool, pos: Option<(f64, f64)>) -> Result<(), String> {
+    const EPS: f64 = 0.001;
+    let outside = |v: f64, max: f64| v < -EPS || v > max + EPS;
+    // how far outside 0..=max a value is
+    let beyond = |v: f64, max: f64| if v < 0.0 { -v } else if v > max { v - max } else { 0.0 };
+    let (mut abs, mut inch) = (true, false);
+    let mut cur = pos;
+    for raw in lines {
+        let line = raw.split(';').next().unwrap_or("").trim().to_ascii_uppercase();
+        let (body, jog) = match line.strip_prefix("$J=") {
+            Some(b) => (b.to_string(), true),
+            None if line.starts_with('$') => continue,
+            None => (line, false),
+        };
+        // a jog's modes apply to that line only
+        let (mut l_abs, mut l_inch) = if jog { (true, false) } else { (abs, inch) };
+        let (mut x, mut y) = (None, None);
+        // words: a letter followed by a number, with or without spaces between them
+        let b = body.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            let c = b[i] as char;
+            if !c.is_ascii_alphabetic() {
+                i += 1;
+                continue;
+            }
+            let start = i + 1;
+            let mut j = start;
+            while j < b.len() && (b[j].is_ascii_digit() || b[j] == b'.' || b[j] == b'-' || b[j] == b'+' || b[j] == b' ') {
+                j += 1;
+            }
+            let num: Option<f64> = body[start..j].replace(' ', "").parse().ok();
+            i = j;
+            let Some(n) = num else { continue };
+            match c {
+                'G' if n == 90.0 => l_abs = true,
+                'G' if n == 91.0 => l_abs = false,
+                'G' if n == 20.0 => l_inch = true,
+                'G' if n == 21.0 => l_inch = false,
+                'X' => x = Some(n),
+                'Y' => y = Some(n),
+                _ => {}
+            }
+        }
+        if !jog {
+            abs = l_abs;
+            inch = l_inch;
+        }
+        if x.is_none() && y.is_none() {
+            continue;
+        }
+        let k = if l_inch { 25.4 } else { 1.0 };
+        let (x, y) = (x.map(|v| v * k), y.map(|v| v * k));
+        let refuse = || Err("This would move outside the work area, so it wasn't sent. Check the work area size in Settings and that nothing is off the bed.".to_string());
+        if l_abs {
+            if x.is_some_and(|v| outside(v, w)) || (check_y && y.is_some_and(|v| outside(v, h))) {
+                return refuse();
+            }
+            let (px, py) = cur.unwrap_or((f64::NAN, f64::NAN));
+            cur = Some((x.unwrap_or(px), y.unwrap_or(py)));
+        } else if let Some((px, py)) = cur {
+            let (nx, ny) = (px + x.unwrap_or(0.0), py + y.unwrap_or(0.0));
+            let worse_x = outside(nx, w) && beyond(nx, w) > beyond(px, w) + EPS;
+            let worse_y = check_y && outside(ny, h) && beyond(ny, h) > beyond(py, h) + EPS;
+            if worse_x || worse_y {
+                return refuse();
+            }
+            cur = Some((nx, ny));
+        }
+    }
+    Ok(())
+}
+
 pub fn bed_box(dev: &Device) -> BBox {
     BBox { min: p2(-1e-6, -1e-6), max: p2(dev.width + 1e-6, dev.height + 1e-6) }
 }
@@ -626,6 +724,17 @@ fn emit_fill(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
                 }
             }
         }
+    }
+}
+
+/// The power for one image pixel (0 = black, 255 = white), or None for laser off. Dithered modes switch the
+/// laser fully on (the layer's max power) or off per pixel; grayscale varies the power with the darkness,
+/// from the min power (white) to the max power (black).
+pub fn image_power(g: u8, mode: Dither, cs: &CutSetting) -> Option<f64> {
+    if mode == Dither::Grayscale {
+        Some(cs.min_power + (cs.max_power - cs.min_power) * (1.0 - g as f64 / 255.0)).filter(|p| *p > 0.01)
+    } else {
+        (g < 128 && cs.max_power > 0.01).then_some(cs.max_power)
     }
 }
 
@@ -661,7 +770,7 @@ fn emit_image(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
             for i in order {
                 let (xa, xb) = if ltr { (xs[i], xs[i + 1]) } else { (xs[i + 1], xs[i]) };
                 let mid = p2((xa + xb) / 2.0, y);
-                let pw = sample(mid).map(|g| cs.min_power + (cs.max_power - cs.min_power) * (1.0 - g as f64 / 255.0)).filter(|p| *p > 0.01);
+                let pw = sample(mid).and_then(|g| image_power(g, adjust.dither, cs));
                 match (run, pw) {
                     (Some((st, rp)), Some(p)) if (rp - p).abs() < 0.5 => {
                         run = Some((st, rp));
@@ -710,6 +819,91 @@ mod tests {
         assert!((job.cut_length - 40.0).abs() < 1e-6);
         assert!(job.gcode.contains("S200"));
         assert!(job.gcode.contains("F6000"));
+    }
+    #[test]
+    fn frame_stays_on_the_bed_when_a_shape_is_off_it() {
+        let dev = Device::default();
+        let mut doc = Document::default();
+        doc.shapes.push(Shape::new(ShapeKind::Rect { w: 10.0, h: 10.0, cr: 0.0 }, Xform::translate(20.0, 20.0), 0));
+        // far off the bed, and hanging over the right edge
+        doc.shapes.push(Shape::new(ShapeKind::Rect { w: 10.0, h: 10.0, cr: 0.0 }, Xform::translate(-200.0, 50.0), 0));
+        doc.shapes.push(Shape::new(ShapeKind::Rect { w: 30.0, h: 10.0, cr: 0.0 }, Xform::translate(dev.width - 5.0, 50.0), 0));
+        doc.sync_cuts();
+        let job = build_job(&doc, &dev, None);
+        let lines = frame_gcode(&job, dev.rapid_speed).unwrap();
+        assert!(check_moves(&lines, dev.width, dev.height, true, None).is_ok());
+        assert!(lines.contains(&"G1 X15.000 Y15.000 F6000 S0".to_string()) || lines.iter().any(|l| l.starts_with("G1 X15.000 Y15.000")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.starts_with("G1 X25.000 Y25.000")), "{lines:?}");
+        assert!(check_moves(&job.gcode.lines().map(String::from).collect::<Vec<_>>(), dev.width, dev.height, true, None).is_ok());
+        // nothing on the bed: nothing to frame
+        let mut off = Document::default();
+        off.shapes.push(Shape::new(ShapeKind::Rect { w: 10.0, h: 10.0, cr: 0.0 }, Xform::translate(-200.0, 50.0), 0));
+        off.sync_cuts();
+        assert!(frame_gcode(&build_job(&off, &dev, None), dev.rapid_speed).is_none());
+    }
+    #[test]
+    fn image_layers_burn_the_chosen_dithering() {
+        // a 40 × 1 pixel strip, black on the left to white on the right, 20 × 1 mm
+        let (pw, ph) = (40u32, 1u32);
+        let mut rgba = Vec::new();
+        for x in 0..pw {
+            let g = (x * 255 / (pw - 1)) as u8;
+            rgba.extend_from_slice(&[g, g, g, 255]);
+        }
+        let data = BitmapData { encoded: std::sync::Arc::new(Vec::new()), width: pw, height: ph, rgba: std::sync::Arc::new(rgba), source_file: String::new() };
+        let dev = Device::default();
+        for mode in Dither::ALL {
+            let mut doc = Document::default();
+            let adjust = ImageAdjust { dither: mode, ..Default::default() };
+            doc.shapes.push(Shape::new(ShapeKind::Bitmap { w: 20.0, h: 1.0, data: data.clone(), adjust }, Xform::translate(50.0, 50.0), 4));
+            doc.sync_cuts();
+            let c = doc.cut_mut(4);
+            c.mode = CutMode::Image;
+            c.min_power = 10.0;
+            c.max_power = 60.0;
+            c.interval = 0.25;
+            c.bidir = false;
+            let job = build_job(&doc, &dev, None);
+            let burns: Vec<&Move> = job.moves.iter().filter(|m| m.power > 0.0).collect();
+            assert!(!burns.is_empty(), "{mode:?}: nothing burns");
+            let burned_len: f64 = burns.iter().map(|m| m.from.dist(m.to)).sum::<f64>() / 4.0; // 4 rows in 1 mm
+            if mode == Dither::Grayscale {
+                // the power follows the darkness: highest on the black (left) end, never below the min
+                let powers: Vec<f32> = burns.iter().map(|m| m.power).collect();
+                assert!(powers.iter().all(|p| (0.0999..=0.6001).contains(p)), "{powers:?}");
+                assert!(powers.iter().copied().fold(0.0, f32::max) > 0.55);
+                let left = burns.iter().min_by(|a, b| a.from.x.total_cmp(&b.from.x)).unwrap();
+                assert!(left.power > 0.55, "darkest end at {}", left.power);
+                assert!(burned_len > 19.0, "grayscale burns the whole strip ({burned_len})");
+            } else {
+                // dithered: fully on at the max power, or off
+                assert!(burns.iter().all(|m| (m.power - 0.6).abs() < 1e-6), "{mode:?}: {:?}", burns.iter().map(|m| m.power).collect::<Vec<_>>());
+                assert!(burned_len > 6.0 && burned_len < 14.0, "{mode:?}: about half the strip burns, not {burned_len}");
+                assert!(job.gcode.contains("S600"), "{mode:?}");
+            }
+        }
+    }
+    #[test]
+    fn moves_outside_the_work_area_are_refused() {
+        let s = |v: &[&str]| v.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+        assert!(check_moves(&s(&["G90", "G1 X100 Y100 S0"]), 400.0, 400.0, true, None).is_ok());
+        assert!(check_moves(&s(&["G90", "G1 X-1 Y100 S0"]), 400.0, 400.0, true, None).is_err());
+        assert!(check_moves(&s(&["G0X401Y0"]), 400.0, 400.0, true, None).is_err());
+        assert!(check_moves(&s(&["G1 X10 Y450"]), 400.0, 400.0, true, None).is_err());
+        // a rotary turning instead of Y: Y isn't limited
+        assert!(check_moves(&s(&["G1 X10 Y450"]), 400.0, 400.0, false, None).is_ok());
+        // inches: 16 in = 406.4 mm
+        assert!(check_moves(&s(&["G20", "G1 X16 Y1"]), 400.0, 400.0, true, None).is_err());
+        assert!(check_moves(&s(&["G20", "G1 X15 Y1"]), 400.0, 400.0, true, None).is_ok());
+        // relative moves and jogs from a known position
+        assert!(check_moves(&s(&["$J=G91 G21 X10 Y0 F3000"]), 400.0, 400.0, true, Some((395.0, 10.0))).is_err());
+        assert!(check_moves(&s(&["$J=G91 G21 X-10 Y0 F3000"]), 400.0, 400.0, true, Some((395.0, 10.0))).is_ok());
+        assert!(check_moves(&s(&["G91", "G1 X0 Y-20"]), 400.0, 400.0, true, Some((5.0, 10.0))).is_err());
+        // already outside: moving back in is allowed, further out isn't
+        assert!(check_moves(&s(&["$J=G91 X5"]), 400.0, 400.0, true, Some((-3.0, 10.0))).is_ok());
+        assert!(check_moves(&s(&["$J=G91 X-5"]), 400.0, 400.0, true, Some((-3.0, 10.0))).is_err());
+        // a jog's G91 doesn't carry over to the next line
+        assert!(check_moves(&s(&["$J=G91 X5", "G1 X450"]), 400.0, 400.0, true, Some((0.0, 0.0))).is_err());
     }
 }
 

@@ -163,16 +163,30 @@ fn layers(ui: &mut Ui, app: &mut App) {
     }
     let mut changed = false;
     let mut choose: Option<usize> = None;
-    egui::Grid::new("cuts").striped(true).num_columns(5).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
+    // listed in burn order (top first); drag a layer by its handle to move it
+    let order = app.doc.layer_order();
+    let mut row_y: Vec<(f32, f32)> = Vec::new();
+    let grid = egui::Grid::new("cuts").striped(true).num_columns(5).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
         ui.label(RichText::new("Layer").strong());
         ui.label(RichText::new("Mode").strong());
         ui.label(RichText::new("Speed/Power").strong());
         ui.label(RichText::new("Burn").strong()).on_hover_text("Include this layer in the job");
         ui.label(RichText::new("Show").strong());
         ui.end_row();
-        for c in app.doc.cuts.iter_mut() {
+        for (pos, &ci) in order.iter().enumerate() {
+            let c = &mut app.doc.cuts[ci];
             let cur = app.current_layer == c.index;
-            ui.horizontal(|ui| {
+            let cell = ui.horizontal(|ui| {
+                ui.dnd_drag_source(egui::Id::unique(("layer_drag", pos)), pos, |ui| {
+                    // a grip of six dots
+                    let (r, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
+                    let dot = theme::colors(ui.visuals().dark_mode).weak;
+                    for (x, y) in [(2.0, 3.0), (6.0, 3.0), (2.0, 7.0), (6.0, 7.0), (2.0, 11.0), (6.0, 11.0)] {
+                        ui.painter().circle_filled(r.min + vec2(x, y), 1.1, dot);
+                    }
+                })
+                .response
+                .on_hover_text("Drag to change the burn order (top burns first)");
                 if swatch(ui, c.index, 16.0, cur).clicked() {
                     choose = Some(c.index);
                 }
@@ -180,6 +194,7 @@ fn layers(ui: &mut Ui, app: &mut App) {
                     choose = Some(c.index);
                 }
             });
+            row_y.push((cell.response.rect.top() - 3.0, cell.response.rect.bottom() + 3.0));
             ui.label(c.mode.label());
             ui.label(format!("{} / {}%", fmt_num(c.speed), fmt_num(c.max_power)));
             changed |= ui.checkbox(&mut c.output, "").changed();
@@ -191,6 +206,26 @@ fn layers(ui: &mut Ui, app: &mut App) {
             ui.end_row();
         }
     });
+    // dropping a dragged layer on a row puts it there
+    let mut moved: Option<(usize, usize)> = None;
+    for (to, (y0, y1)) in row_y.iter().enumerate() {
+        let r = egui::Rect::from_x_y_ranges(grid.response.rect.x_range(), *y0..=*y1);
+        let resp = ui.interact(r, egui::Id::unique(("layer_drop", to)), Sense::hover());
+        if let Some(from) = resp.dnd_hover_payload::<usize>() {
+            if *from != to {
+                let y = if *from < to { r.bottom() } else { r.top() };
+                ui.painter().hline(r.x_range(), y, Stroke::new(2.0, ACCENT));
+            }
+        }
+        if let Some(from) = resp.dnd_release_payload::<usize>() {
+            moved = Some((*from, to));
+        }
+    }
+    if let Some((from, to)) = moved {
+        app.checkpoint();
+        app.doc.move_layer(from, to);
+        app.touch();
+    }
     if let Some(i) = choose {
         app.current_layer = i;
     }
@@ -226,7 +261,7 @@ fn layers(ui: &mut Ui, app: &mut App) {
             ui.add(egui::Slider::new(&mut c.min_power, 0.0..=100.0).suffix(" %"));
             ui.end_row();
             ui.label("Passes");
-            ui.add(egui::DragValue::new(&mut c.passes).range(1..=100));
+            ui.add(crate::settings::num(&mut c.passes).range(1..=100));
             ui.end_row();
             if matches!(c.mode, CutMode::Fill | CutMode::FillLine | CutMode::OffsetFill | CutMode::Image) {
                 ui.label("Line interval");
@@ -241,7 +276,7 @@ fn layers(ui: &mut Ui, app: &mut App) {
             }
             if matches!(c.mode, CutMode::Fill | CutMode::FillLine | CutMode::OffsetFill) {
                 ui.label("Scan angle");
-                ui.add(egui::DragValue::new(&mut c.angle).range(-180.0..=180.0).suffix("°"));
+                ui.add(crate::settings::num(&mut c.angle).range(-180.0..=180.0).suffix("°"));
                 ui.end_row();
                 ui.label("Cross-hatch");
                 ui.checkbox(&mut c.cross_hatch, "");
@@ -262,10 +297,7 @@ fn layers(ui: &mut Ui, app: &mut App) {
             ui.checkbox(&mut c.air_assist, "");
             ui.end_row();
             ui.label("Frequency");
-            ui.add(egui::DragValue::new(&mut c.frequency).range(1.0..=1_000_000.0).speed(100.0).suffix(" Hz")).on_hover_text("Pulse frequency, for fiber and PWM sources that use it");
-            ui.end_row();
-            ui.label("Order");
-            ui.add(egui::DragValue::new(&mut c.priority).range(0..=99)).on_hover_text("Lower numbers burn first");
+            ui.add(crate::settings::num(&mut c.frequency).range(1.0..=1_000_000.0).speed(100.0).suffix(" Hz")).on_hover_text("Pulse frequency, for fiber and PWM sources that use it");
             ui.end_row();
         });
         let after = app.doc.cut(idx).cloned();
@@ -297,8 +329,12 @@ fn properties(ui: &mut Ui, app: &mut App) {
         return;
     }
     let bb = app.selection_box();
-    let mut cx = bb.center().x * f;
-    let mut cy = bb.center().y * f;
+    // X / Y are the chosen reference point of the selection's box (bottom-left unless changed)
+    let [ax, ay] = app.settings.anchor;
+    let anchor_of = |b: &BBox| p2(b.min.x + b.width() * ax as f64 / 2.0, b.min.y + b.height() * ay as f64 / 2.0);
+    let ap = anchor_of(&bb);
+    let mut cx = ap.x * f;
+    let mut cy = ap.y * f;
     let mut w = bb.width() * f;
     let mut h = bb.height() * f;
     let (ocx, ocy, ow, oh) = (cx, cy, w, h);
@@ -343,6 +379,13 @@ fn properties(ui: &mut Ui, app: &mut App) {
         ui.checkbox(&mut app.lock_aspect, "Lock ratio");
         ui.end_row();
     });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("X / Y point").size(11.5));
+        if anchor_picker(ui, &mut app.settings.anchor) {
+            let now = ui.input(|i| i.time);
+            app.save_settings(now);
+        }
+    });
     ui.label(RichText::new("Use − / +, the mouse wheel, or ↑ ↓ (Shift = ×10, Ctrl = ÷10)").size(10.5).color(theme::colors(ui.visuals().dark_mode).weak));
     let moved = cx != ocx || cy != ocy;
     let mut resized = w != ow || h != oh;
@@ -362,14 +405,16 @@ fn properties(ui: &mut Ui, app: &mut App) {
         let c = bb.center();
         let sel = app.sel.clone();
         if resized {
-            let t = Xform::about(c, Xform::scale((w / f) / bb.width().max(1e-9), (h / f) / bb.height().max(1e-9)));
+            // resize from the reference point, so it stays put
+            let t = Xform::about(ap, Xform::scale((w / f) / bb.width().max(1e-9), (h / f) / bb.height().max(1e-9)));
             crate::ops::transform_selection(&mut app.doc, &sel, t);
         }
         if rot != orot {
             crate::ops::transform_selection(&mut app.doc, &sel, Xform::about(c, Xform::rotate((rot - orot).to_radians())));
         }
         if moved {
-            crate::ops::transform_selection(&mut app.doc, &sel, Xform::translate(cx / f - c.x, cy / f - c.y));
+            let now_at = anchor_of(&app.selection_box());
+            crate::ops::transform_selection(&mut app.doc, &sel, Xform::translate(cx / f - now_at.x, cy / f - now_at.y));
         }
         app.touch();
     }
@@ -407,7 +452,7 @@ fn properties(ui: &mut Ui, app: &mut App) {
         ShapeKind::Polygon { n, .. } => {
             ui.horizontal(|ui| {
                 ui.label("Sides");
-                changed |= ui.add(egui::DragValue::new(n).range(3..=crate::sketch::POLYGON_MAX_SIDES)).changed();
+                changed |= ui.add(crate::settings::num(n).range(3..=crate::sketch::POLYGON_MAX_SIDES)).changed();
             });
         }
         ShapeKind::Text { text, height, backup, font, style } => {
@@ -424,20 +469,76 @@ fn properties(ui: &mut Ui, app: &mut App) {
                 ui.label("Font");
                 if ui.button(format!("{}  ▾", spec.label())).on_hover_text("Choose from the fonts installed on this computer").clicked() {
                     app.canvas.font_list_open = !app.canvas.font_list_open;
+                    app.canvas.font_cursor = None;
+                    app.canvas.font_list_new = true;
                 }
                 ui.toggle_value(&mut spec.bold, RichText::new(" B ").strong()).on_hover_text("Bold");
                 ui.toggle_value(&mut spec.italic, RichText::new(" I ").italics()).on_hover_text("Italic");
+                let (fb, fi) = crate::fonts::simulated(&spec);
+                if (spec.bold && fb) || (spec.italic && fi) {
+                    ui.label(RichText::new("(simulated)").size(10.5).weak()).on_hover_text("This font has no real bold or italic, so BurnCraft thickens or slants the letters");
+                }
             });
             if app.canvas.font_list_open {
-                ui.add(egui::TextEdit::singleline(&mut app.canvas.font_filter).hint_text("Search fonts…").desired_width(f32::INFINITY));
+                // the search box keeps the keyboard: typing finds fonts, ↑ / ↓ try them on the bed, Enter keeps
+                // one, Escape goes back to the font you had
+                let search = ui.add(egui::TextEdit::singleline(&mut app.canvas.font_filter).hint_text("Search fonts… (↑ ↓ to try, Enter to keep)").desired_width(f32::INFINITY));
+                if std::mem::take(&mut app.canvas.font_list_new) {
+                    search.request_focus();
+                }
                 let filter = app.canvas.font_filter.to_lowercase();
                 let fams = crate::fonts::families();
+                let mut entries: Vec<(&str, &str)> = vec![("", "Default (built-in)")];
+                entries.extend(fams.iter().filter(|f| filter.is_empty() || f.to_lowercase().contains(&filter)).map(|f| (f.as_str(), f.as_str())));
+                if search.changed() {
+                    app.canvas.font_cursor = None;
+                }
+                let mut moved = false;
+                let mut keep: Option<usize> = None;
+                if search.has_focus() {
+                    let (up, down, enter, esc) = ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown), i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+                    let here = app.canvas.font_cursor.or_else(|| entries.iter().position(|(f, _)| *f == spec.family));
+                    if up || down {
+                        let n = entries.len();
+                        let k = match here {
+                            None => 0,
+                            Some(k) if down => (k + 1).min(n - 1),
+                            Some(k) => k.saturating_sub(1),
+                        };
+                        app.canvas.font_cursor = Some(k);
+                        moved = true;
+                    }
+                    if enter {
+                        keep = app.canvas.font_cursor.or(here);
+                    }
+                    if esc {
+                        app.canvas.font_cursor = None;
+                        app.canvas.font_list_open = false;
+                    }
+                } else if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    // Escape: back to the font you had
+                    app.canvas.font_cursor = None;
+                    app.canvas.font_list_open = false;
+                } else if search.lost_focus() {
+                    // Enter, or clicking away, keeps the font tried with the arrow keys
+                    keep = app.canvas.font_cursor;
+                }
+                if let Some(k) = keep.filter(|k| *k < entries.len()) {
+                    spec.family = entries[k].0.to_string();
+                    app.canvas.font_cursor = None;
+                    app.canvas.font_list_open = false;
+                }
+                if let Some(k) = app.canvas.font_cursor.filter(|k| *k < entries.len()) {
+                    app.canvas.font_hover = Some(crate::fonts::FontSpec { family: entries[k].0.to_string(), ..spec.clone() }.to_qt());
+                }
+                let cursor = app.canvas.font_cursor;
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     egui::ScrollArea::vertical().id_salt("fontlist").max_height(200.0).auto_shrink([false, true]).show(ui, |ui| {
-                        let mut entries: Vec<(&str, &str)> = vec![("", "Default (built-in)")];
-                        entries.extend(fams.iter().filter(|f| filter.is_empty() || f.to_lowercase().contains(&filter)).map(|f| (f.as_str(), f.as_str())));
-                        for (fam, label) in entries {
-                            let r = ui.selectable_label(spec.family == fam, label);
+                        for (k, (fam, label)) in entries.iter().copied().enumerate() {
+                            let r = ui.selectable_label(cursor.map(|c| c == k).unwrap_or(spec.family == fam), label);
+                            if moved && cursor == Some(k) {
+                                r.scroll_to_me(None);
+                            }
                             if r.hovered() {
                                 let hs = crate::fonts::FontSpec { family: fam.to_string(), ..spec.clone() };
                                 app.canvas.font_hover = Some(hs.to_qt());
@@ -452,7 +553,7 @@ fn properties(ui: &mut Ui, app: &mut App) {
                         }
                     });
                 });
-                ui.label(RichText::new("Point at a font to preview it on the bed.").size(11.0));
+                ui.label(RichText::new("Point at a font, or use ↑ / ↓, to preview it on the bed.").size(11.0));
             }
             if spec != before {
                 *font = spec.to_qt();
@@ -764,7 +865,8 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
         ui.label("mm");
     });
     if let Some((dx, dy)) = jog {
-        app.laser.send(Cmd::Send(vec![format!("$J=G91 G21 X{dx:.3} Y{dy:.3} F3000")]));
+        let now = ui.input(|i| i.time);
+        app.send_gcode(vec![format!("$J=G91 G21 X{dx:.3} Y{dy:.3} F3000")], now);
     }
     ui.horizontal(|ui| {
         for a in [Action::LaserFrame, Action::LaserStart, Action::LaserPause, Action::LaserStop] {
@@ -959,12 +1061,12 @@ fn num_field(ui: &mut Ui, id: &str, v: &mut f64, step: f64, suffix: &str, min: O
         let k = if mods.shift { 10.0 } else if mods.ctrl || mods.command { 0.1 } else { 1.0 };
         let st = step * k;
         let lo = min.unwrap_or(f64::NEG_INFINITY);
-        if ui.add(egui::Button::new("−").min_size(vec2(22.0, 22.0))).clicked() {
+        if ui.add(egui::Button::new("−").min_size(vec2(22.0, 22.0)).sense(Sense::CLICK)).clicked() {
             *v = (*v - st).max(lo);
         }
-        let resp = ui.add(egui::DragValue::new(v).speed(st * 0.5).max_decimals(3).suffix(suffix).range(lo..=f64::INFINITY)).on_hover_text("Scroll or use ↑/↓ to adjust");
+        let resp = ui.add(crate::settings::num(v).speed(st * 0.5).max_decimals(3).suffix(suffix).range(lo..=f64::INFINITY)).on_hover_text("Scroll or use ↑/↓ to adjust");
         ui.push_id(id, |_| {});
-        if ui.add(egui::Button::new("+").min_size(vec2(22.0, 22.0))).clicked() {
+        if ui.add(egui::Button::new("+").min_size(vec2(22.0, 22.0)).sense(Sense::CLICK)).clicked() {
             *v += st;
         }
         if resp.hovered() {
@@ -1008,4 +1110,28 @@ fn long_len(u: crate::settings::Units, mm: f64) -> String {
         crate::settings::Units::Mm => format!("{mm:.0} mm"),
         crate::settings::Units::Inch => format!("{:.1} in", mm / 25.4),
     }
+}
+
+/// A small 3 × 3 grid of dots: which point of the selection's box X / Y refer to. True when changed.
+fn anchor_picker(ui: &mut Ui, anchor: &mut [u8; 2]) -> bool {
+    let size = 13.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(size * 3.0, size * 3.0), Sense::click());
+    let col = theme::colors(ui.visuals().dark_mode);
+    ui.painter().rect_stroke(rect.shrink(size / 2.0 - 1.0), 0.0, Stroke::new(1.0, col.weak), egui::StrokeKind::Middle);
+    let mut changed = false;
+    for gx in 0..3u8 {
+        for gy in 0..3u8 {
+            // gy 0 = bottom, drawn at the bottom
+            let c = rect.min + vec2((gx as f32 + 0.5) * size, (2.0 - gy as f32 + 0.5) * size);
+            let on = *anchor == [gx, gy];
+            ui.painter().circle_filled(c, if on { 4.5 } else { 2.5 }, if on { ACCENT } else { col.weak });
+            if resp.clicked() && resp.interact_pointer_pos().is_some_and(|p| (p - c).abs().max_elem() <= size / 2.0) && !on {
+                *anchor = [gx, gy];
+                changed = true;
+            }
+        }
+    }
+    let names = [["bottom-left", "left middle", "top-left"], ["bottom middle", "centre", "top middle"], ["bottom-right", "right middle", "top-right"]];
+    resp.on_hover_text(format!("X / Y set the {} of the selection. Click a dot to change.", names[anchor[0] as usize][anchor[1] as usize]));
+    changed
 }

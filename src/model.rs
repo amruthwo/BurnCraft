@@ -208,6 +208,56 @@ impl PathData {
         pd
     }
 
+    /// Split into separate paths: one per run of joined-up pieces (each closed outline, hole or open line),
+    /// keeping lines and curves as they are.
+    pub fn components(&self) -> Vec<PathData> {
+        let n = self.verts.len();
+        let mut parent: Vec<usize> = (0..n).collect();
+        fn root(p: &mut [usize], mut i: usize) -> usize {
+            while p[i] != i {
+                p[i] = p[p[i]];
+                i = p[i];
+            }
+            i
+        }
+        for pr in &self.prims {
+            if pr.a < n && pr.b < n {
+                let (ra, rb) = (root(&mut parent, pr.a), root(&mut parent, pr.b));
+                parent[ra] = rb;
+            }
+        }
+        // group the primitives by component, in the order they first appear
+        let mut order: Vec<usize> = Vec::new();
+        let mut groups: std::collections::HashMap<usize, Vec<Prim>> = std::collections::HashMap::new();
+        for pr in self.prims.iter().filter(|p| p.a < n && p.b < n) {
+            let r = root(&mut parent, pr.a);
+            groups.entry(r).or_insert_with(|| {
+                order.push(r);
+                Vec::new()
+            });
+            groups.get_mut(&r).unwrap().push(*pr);
+        }
+        order
+            .into_iter()
+            .map(|r| {
+                let prims = &groups[&r];
+                let mut map = std::collections::HashMap::new();
+                let mut pd = PathData::default();
+                let mut idx = |v: usize, pd: &mut PathData| -> usize {
+                    *map.entry(v).or_insert_with(|| {
+                        pd.verts.push(self.verts[v]);
+                        pd.verts.len() - 1
+                    })
+                };
+                for pr in prims {
+                    let (a, b) = (idx(pr.a, &mut pd), idx(pr.b, &mut pd));
+                    pd.prims.push(Prim { kind: pr.kind, a, b });
+                }
+                pd
+            })
+            .collect()
+    }
+
     /// Chain primitives into polylines in local coordinates.
     pub fn flatten(&self, tol: f64) -> Vec<Vec<P2>> {
         let mut out: Vec<Vec<P2>> = Vec::new();
@@ -707,6 +757,34 @@ impl Document {
             }
         }
         self.cuts.retain(|c| used.contains(&c.index));
+        self.renumber_layers();
+    }
+
+    /// The layers in burn order (lowest priority first): positions in `cuts`.
+    pub fn layer_order(&self) -> Vec<usize> {
+        let mut o: Vec<usize> = (0..self.cuts.len()).collect();
+        o.sort_by_key(|&i| (self.cuts[i].priority, self.cuts[i].index));
+        o
+    }
+
+    /// Give every layer its own place in the burn order (0, 1, 2… in the current order), so no two share one.
+    pub fn renumber_layers(&mut self) {
+        for (k, i) in self.layer_order().into_iter().enumerate() {
+            self.cuts[i].priority = k as i32;
+        }
+    }
+
+    /// Move the layer at place `from` in the burn order to place `to`.
+    pub fn move_layer(&mut self, from: usize, to: usize) {
+        let mut o = self.layer_order();
+        if from >= o.len() || to >= o.len() || from == to {
+            return;
+        }
+        let i = o.remove(from);
+        o.insert(to, i);
+        for (k, i) in o.into_iter().enumerate() {
+            self.cuts[i].priority = k as i32;
+        }
     }
     pub fn bbox(&self) -> BBox {
         self.shapes.iter().fold(BBox::EMPTY, |b, s| b.union(&s.bbox()))
@@ -716,6 +794,36 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn layers_burn_in_list_order_and_can_be_moved() {
+        let mut d = Document::default();
+        for l in [3usize, 0, 7] {
+            d.shapes.push(Shape::new(ShapeKind::Rect { w: 5.0, h: 5.0, cr: 0.0 }, Xform::translate(10.0 * l as f64 + 10.0, 10.0), l));
+        }
+        // as a LightBurn file might have them: 7 first, two sharing a number
+        d.sync_cuts();
+        d.cut_mut(7).priority = -1;
+        d.cut_mut(0).priority = 5;
+        d.cut_mut(3).priority = 5;
+        d.renumber_layers();
+        let names = |d: &Document| d.layer_order().iter().map(|&i| d.cuts[i].index).collect::<Vec<_>>();
+        assert_eq!(names(&d), vec![7, 0, 3]);
+        let mut p: Vec<i32> = d.cuts.iter().map(|c| c.priority).collect();
+        p.sort();
+        assert_eq!(p, vec![0, 1, 2], "every layer has its own place");
+        // drag the last to the top
+        d.move_layer(2, 0);
+        assert_eq!(names(&d), vec![3, 7, 0]);
+        // the job burns in that order
+        let job = crate::gcode::build_job(&d, &crate::gcode::Device::default(), None);
+        let firsts: Vec<usize> = job.moves.iter().filter(|m| m.power > 0.0).map(|m| m.layer).fold(Vec::new(), |mut v, l| {
+            if v.last() != Some(&l) {
+                v.push(l);
+            }
+            v
+        });
+        assert_eq!(firsts, vec![3, 7, 0]);
+    }
     #[test]
     fn rect_path_is_closed() {
         let pd = rect_path(10.0, 6.0, 2.0);

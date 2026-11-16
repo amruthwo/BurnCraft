@@ -207,20 +207,36 @@ pub fn break_apart(doc: &mut Document, sel: &[usize]) -> Vec<usize> {
         if s.is_bitmap() {
             continue;
         }
-        let lines = s.world_outline(0.02);
-        if lines.len() < 2 {
-            new_sel.push(i);
-            continue;
-        }
         let layer = s.layer;
+        // a path: each separate outline (holes too) becomes its own path, keeping its curves; anything else
+        // (text, groups…) is split into its outlines
+        let pieces: Vec<Shape> = match &s.kind {
+            ShapeKind::Path(pd) => {
+                let parts = pd.components();
+                if parts.len() < 2 {
+                    new_sel.push(i);
+                    continue;
+                }
+                parts.into_iter().map(|p| Shape::new(ShapeKind::Path(p), s.xform, layer)).collect()
+            }
+            _ => {
+                let lines = s.world_outline(0.02);
+                if lines.len() < 2 {
+                    new_sel.push(i);
+                    continue;
+                }
+                lines.iter().map(|l| Shape::new(ShapeKind::Path(PathData::from_polylines(std::slice::from_ref(l))), Xform::IDENTITY, layer)).collect()
+            }
+        };
+        let n = pieces.len();
         doc.shapes.remove(i);
-        for (k, l) in lines.iter().enumerate() {
-            doc.shapes.insert(i + k, Shape::new(ShapeKind::Path(PathData::from_polylines(&[l.clone()])), Xform::IDENTITY, layer));
+        for (k, p) in pieces.into_iter().enumerate() {
+            doc.shapes.insert(i + k, p);
         }
         for v in new_sel.iter_mut() {
-            *v += lines.len() - 1;
+            *v += n - 1;
         }
-        new_sel.extend(i..i + lines.len());
+        new_sel.extend(i..i + n);
     }
     new_sel
 }
@@ -356,13 +372,27 @@ impl Default for OffsetOpts {
     }
 }
 
+/// Grow (or with a negative `d`, shrink) closed outlines; used for simulated bold text.
+pub fn grow(rings: &[Vec<P2>], d: f64) -> Vec<Vec<P2>> {
+    let mp = to_multipolygon(rings);
+    if mp.0.is_empty() {
+        return rings.to_vec();
+    }
+    from_multipolygon(&buffer(&mp, d, OffsetJoin::Corner))
+}
+
+/// Corner joins stay pointed until the point would reach this many times the offset distance.
+pub const MITER_LIMIT: f64 = 4.0;
+
 fn buffer(mp: &MultiPolygon<f64>, d: f64, join: OffsetJoin) -> MultiPolygon<f64> {
     use geo::algorithm::buffer::{BufferStyle, LineJoin};
     let style = BufferStyle::new(d);
     let style = match join {
         OffsetJoin::Round => style,
         OffsetJoin::Bevel => style.line_join(LineJoin::Bevel),
-        OffsetJoin::Corner => style.line_join(LineJoin::Miter(4.0)),
+        // geo takes the sharpest corner angle that still gets a pointed corner (in radians), not a length
+        // ratio: a miter limit of 4 (the usual) means corners sharper than 2·asin(1/4) ≈ 29° are bevelled
+        OffsetJoin::Corner => style.line_join(LineJoin::Miter(2.0 * (1.0f64 / MITER_LIMIT).asin())),
     };
     mp.buffer_with_style(style)
 }
@@ -490,6 +520,39 @@ pub fn offset(doc: &mut Document, sel: &[usize], o: &OffsetOpts) -> Result<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Corners of a closed ring: points where the direction turns by more than 1°.
+    fn corners(r: &[P2]) -> usize {
+        let pts: Vec<P2> = if is_closed(r) { r[..r.len() - 1].to_vec() } else { r.to_vec() };
+        let n = pts.len();
+        (0..n)
+            .filter(|&i| {
+                let (a, b, c) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
+                let (u, v) = (b - a, c - b);
+                let turn = (u.x * v.y - u.y * v.x).atan2(u.x * v.x + u.y * v.y).abs();
+                turn > 1f64.to_radians()
+            })
+            .count()
+    }
+
+    #[test]
+    fn corner_joins_keep_a_hexagon_sharp() {
+        let hex = Shape::new(ShapeKind::Polygon { n: 6, rx: 20.0, ry: 20.0 }, Xform::translate(50.0, 50.0), 0);
+        for (join, want) in [(OffsetJoin::Corner, 6), (OffsetJoin::Bevel, 12)] {
+            for dir in [OffsetDir::Outward, OffsetDir::Inward] {
+                let o = OffsetOpts { dist: 3.0, dir, join, optimize: false, ..Default::default() };
+                let rings = offset_lines(&hex, &o);
+                assert_eq!(rings.len(), 1);
+                // inward offsets of a convex shape stay sharp whatever the join
+                let want = if dir == OffsetDir::Inward { 6 } else { want };
+                assert_eq!(corners(&rings[0]), want, "{join:?} {dir:?}: {:?}", rings[0]);
+            }
+        }
+        // a Corner offset's edges stay parallel to the hexagon's, 3 mm out: its corners are 3 / cos 30° further out
+        let o = OffsetOpts { dist: 3.0, join: OffsetJoin::Corner, optimize: false, ..Default::default() };
+        let far = offset_lines(&hex, &o)[0].iter().map(|p| p.dist(p2(50.0, 50.0))).fold(0.0, f64::max);
+        assert!((far - (20.0 + 3.0 / 30f64.to_radians().cos())).abs() < 0.01, "{far}");
+    }
+
     fn sq(x: f64, y: f64, s: f64) -> Shape {
         Shape::new(ShapeKind::Rect { w: s, h: s, cr: 0.0 }, Xform::translate(x, y), 0)
     }
@@ -541,4 +604,51 @@ pub fn selection_overlaps(doc: &Document, sel: &[usize]) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod break_apart_tests {
+    use super::*;
+    use crate::imaging::{trace, TraceEngine, TraceParams};
+
+    /// A picture of a ring (a square with a square hole) and a separate dot, traced either way, is one path;
+    /// Break Apart makes every closed outline its own shape: outer, hole and dot.
+    #[test]
+    fn traced_outlines_break_apart_into_separate_shapes() {
+        let (w, h) = (240usize, 160usize);
+        let mut gray = vec![255u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let (x, y, i) = (x / 4, y / 4, y * w + x);
+                let ring = (5..30).contains(&x) && (5..30).contains(&y) && !((12..23).contains(&x) && (12..23).contains(&y));
+                let dot = (40..52).contains(&x) && (10..22).contains(&y);
+                if ring || dot {
+                    gray[i] = 0;
+                }
+            }
+        }
+        for engine in [TraceEngine::Precise, TraceEngine::Smooth] {
+            let lines = trace(&gray, w, h, &TraceParams { engine, ..Default::default() });
+            let mut doc = Document::default();
+            doc.shapes.push(Shape::new(ShapeKind::Path(PathData::from_polylines(&lines)), Xform::IDENTITY, 0));
+            let sel = break_apart(&mut doc, &[0]);
+            assert_eq!(sel.len(), 3, "{engine:?}: {} traced lines → {} shapes", lines.len(), sel.len());
+            assert_eq!(doc.shapes.len(), 3);
+            for s in &doc.shapes {
+                let o = s.world_outline(0.05);
+                assert_eq!(o.len(), 1);
+                assert!(is_closed(&o[0]), "{engine:?}: each piece is closed");
+            }
+        }
+        // curves stay curves: two circles drawn as one path
+        let mut pd = PathData::default();
+        crate::sketch::append_path(&mut pd, &crate::sketch::circle_path(p2(10.0, 10.0), 5.0));
+        crate::sketch::append_path(&mut pd, &crate::sketch::circle_path(p2(30.0, 10.0), 5.0));
+        let curves = pd.prims.iter().filter(|p| p.kind == PrimKind::Bezier).count();
+        let mut doc = Document::default();
+        doc.shapes.push(Shape::new(ShapeKind::Path(pd), Xform::IDENTITY, 0));
+        assert_eq!(break_apart(&mut doc, &[0]).len(), 2);
+        let after: usize = doc.shapes.iter().map(|s| match &s.kind { ShapeKind::Path(p) => p.prims.iter().filter(|p| p.kind == PrimKind::Bezier).count(), _ => 0 }).sum();
+        assert_eq!(after, curves);
+    }
 }

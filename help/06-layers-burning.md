@@ -17,7 +17,7 @@ Each palette colour is a layer with its own settings (Layers panel):
 
 ## Cut order
 
-Layers burn in the order of the Layers list. Within a layer BurnCraft uses LightBurn-compatible defaults: nearest shape next, inner shapes before the shapes around them, and open lines from whichever end is closer. Change these in Settings > Cut optimization.
+Layers burn in the order of the Layers list, top first: drag a layer by its dotted handle to move it. The order is saved with the project. Within a layer BurnCraft uses LightBurn-compatible defaults: nearest shape next, inner shapes before the shapes around them, and open lines from whichever end is closer. Change these in Settings > Cut optimization.
 
 ## Running a job
 

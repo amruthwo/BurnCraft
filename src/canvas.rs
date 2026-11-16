@@ -49,6 +49,10 @@ pub struct CanvasState {
     pub font_list_open: bool,
     pub font_filter: String,
     pub font_hover: Option<String>,
+    /// Font list: the font picked with the arrow keys (shown on the bed until Enter keeps it), and whether
+    /// the list was just opened (to put the keyboard in its search box).
+    pub font_cursor: Option<usize>,
+    pub font_list_new: bool,
     pub font_preview_cache: Option<(String, u64, Vec<Vec<P2>>)>,
     pub bool_preview: Option<(u64, Action, Vec<Vec<P2>>)>,
     /// Smart guides: what the cursor snapped to this frame, points/lines the user rested on.
@@ -770,8 +774,13 @@ pub fn canvas_ui(app: &mut App, ui: &mut Ui) -> Vec<Action> {
 
     paint(app, ui, &ctx, rect, &tf, &resp, raw_world, snapped, mods, now, primary_pan);
 
-    if app.doc.shapes.is_empty() && app.screenshot.is_none() && !app.welcome_off {
+    if app.doc.shapes.is_empty() && app.screenshot.is_none() && !app.welcome_off && app.settings.show_welcome {
         welcome(ui, app, rect, &mut run);
+        if let Some(show) = ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("welcome_setting"))) {
+            app.settings.show_welcome = show;
+            let now = ui.input(|i| i.time);
+            app.save_settings(now);
+        }
         if ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::unique("hide_welcome"))).unwrap_or(false) {
             app.welcome_off = true;
         }
@@ -1095,7 +1104,24 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
             let n = ((job.moves.len() as f32) * app.preview_t) as usize;
             painter.rect_filled(bed, 2.0, Color32::from_black_alpha(if dark_bed { 120 } else { 40 }));
             let stride = (n / 150_000).max(1);
+            // image layers: each burned run drawn as wide as the line interval, darker for more power, so the
+            // dither dots or grey levels show as they'll burn
+            let image_line = |layer: usize| -> Option<f32> {
+                app.doc.cut(layer).filter(|c| c.mode == CutMode::Image).map(|c| ((c.interval * zoom) as f32).max(0.6))
+            };
+            let mut image_w: std::collections::HashMap<usize, Option<f32>> = std::collections::HashMap::new();
             for m in job.moves[..n].iter().step_by(stride) {
+                let img = *image_w.entry(m.layer).or_insert_with(|| image_line(m.layer));
+                if let Some(w) = img {
+                    // the short hops between dots along a row aren't drawn
+                    if m.power > 0.0 {
+                        let c = display_color(m.layer, true).gamma_multiply(0.15 + 0.85 * m.power.clamp(0.0, 1.0));
+                        painter.line_segment([tf.s(m.from), tf.s(m.to)], Stroke::new(w, c));
+                    } else if (m.from.y - m.to.y).abs() > 1e-6 {
+                        painter.line_segment([tf.s(m.from), tf.s(m.to)], Stroke::new(0.5, col.weak.gamma_multiply(0.3)));
+                    }
+                    continue;
+                }
                 if m.power <= 0.0 {
                     painter.add(EShape::dashed_line(&[tf.s(m.from), tf.s(m.to)], Stroke::new(0.7, col.weak.gamma_multiply(0.5)), 4.0, 4.0));
                 } else {
@@ -2560,9 +2586,10 @@ fn double_click(app: &mut App, w: P2, zoom: f64) {
 }
 
 fn welcome(ui: &mut Ui, app: &App, rect: Rect, run: &mut Vec<Action>) {
+    // (the Select tool stays chosen: "Start with an empty design" only closes this card)
     let dark = ui.visuals().dark_mode;
     let col = theme::colors(dark);
-    let card = Rect::from_center_size(rect.center(), vec2(460.0_f32.min(rect.width() - 20.0), 330.0_f32.min(rect.height() - 20.0)));
+    let card = Rect::from_center_size(rect.center(), vec2(460.0_f32.min(rect.width() - 20.0), 360.0_f32.min(rect.height() - 20.0)));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(card));
     egui::Frame::NONE.fill(col.panel.gamma_multiply(0.97)).corner_radius(14.0).stroke(Stroke::new(1.0, col.border)).inner_margin(22.0).show(&mut child, |ui| {
         ui.set_width(card.width() - 44.0);
@@ -2572,7 +2599,7 @@ fn welcome(ui: &mut Ui, app: &App, rect: Rect, run: &mut Vec<Action>) {
             ui.label(egui::RichText::new("Design, trace and burn — open LightBurn projects too.").color(col.weak));
             ui.add_space(16.0);
         });
-        let items = [(Action::Open, "Open a project (.lbrn2 / .lbrn)"), (Action::Import, "Import an image to trace or engrave"), (Action::ToolRect, "Start drawing"), (Action::Shortcuts, "Set up keyboard shortcuts")];
+        let items = [(Action::Open, "Open a project (.lbrn2 / .lbrn)"), (Action::Import, "Import an image to trace or engrave"), (Action::ToolSelect, "Start with an empty design"), (Action::Shortcuts, "Set up keyboard shortcuts")];
         for (a, text) in items {
             // icon and label side by side with room between, so they never overlap
             let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::click());
@@ -2583,7 +2610,7 @@ fn welcome(ui: &mut Ui, app: &App, rect: Rect, run: &mut Vec<Action>) {
             ui.painter().text(pos2(r.left() + 50.0, r.center().y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), col.text);
             if resp.on_hover_text(app.tooltip(a)).clicked() {
                 run.push(a);
-                if a == Action::ToolRect {
+                if a == Action::ToolSelect {
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("hide_welcome"), true));
                 }
             }
@@ -2596,6 +2623,13 @@ fn welcome(ui: &mut Ui, app: &App, rect: Rect, run: &mut Vec<Action>) {
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("load_demo"), true));
             }
             ui.label(egui::RichText::new(format!("Press {} to search all commands", app.settings.keymap.label(Action::CommandSearch))).size(11.0).color(col.weak));
+            let mut skip = false;
+            if ui.checkbox(&mut skip, "Don't show this again").on_hover_text("Turn it back on in Settings → Getting started").changed() && skip {
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::unique("welcome_setting"), false);
+                    d.insert_temp(egui::Id::unique("hide_welcome"), true);
+                });
+            }
         });
     });
 }

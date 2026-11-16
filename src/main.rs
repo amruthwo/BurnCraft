@@ -270,6 +270,32 @@ impl Root {
 }
 
 impl eframe::App for Root {
+    /// Ctrl+C / X / V arrive as plain keys (clipboard_shortcuts is off), so the canvas's Copy / Cut / Paste
+    /// run once per key press. In a text box they're turned back into egui's clipboard events, reading the
+    /// clipboard ourselves.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if !ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        for e in raw.events.iter_mut() {
+            if let Event::Key { key, pressed: true, modifiers, .. } = e {
+                if modifiers.command_only() || (*key == Key::Insert && modifiers.shift_only()) {
+                    match key {
+                        Key::C => *e = Event::Copy,
+                        Key::X => *e = Event::Cut,
+                        Key::V | Key::Insert => {
+                            if let Some(t) = platform::clipboard_text() {
+                                *e = Event::Paste(t.replace("\r\n", "\n"));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if !self.started {
@@ -360,6 +386,8 @@ impl eframe::App for Root {
         let col = theme::colors(ui.visuals().dark_mode);
         let narrow = ctx.content_rect().width() < 900.0;
 
+        // no system frame: the window's edges resize it
+        ribbon::edge_resize(&ctx, app);
         let r = egui::Panel::top("ribbon").frame(egui::Frame::NONE.fill(col.ribbon).inner_margin(egui::Margin::symmetric(8, 4))).show(ui, |ui| {
             run.extend(ribbon::ribbon(ui, app));
         });
@@ -446,7 +474,10 @@ impl eframe::App for Root {
         } else if app.net_job.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
-        // a nest finished?
+        // a nest finished? (in the browser, work on it for a moment each frame)
+        if let Some(j) = &app.nest_job {
+            j.tick();
+        }
         let nested = app.nest_job.as_ref().and_then(|j| j.result.lock().ok().and_then(|mut g| g.take()).map(|r| (r, j.rev)));
         if let Some(done) = nested {
             app.nest_job = None;
@@ -454,7 +485,12 @@ impl eframe::App for Root {
                 app.nest_result = Some(done);
             }
         } else if app.nest_job.is_some() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+            // the browser works on it between frames, so keep frames coming
+            if cfg!(target_arch = "wasm32") {
+                ctx.request_repaint();
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(150));
+            }
         }
         // update checker: announce a newer version once, keep redrawing while it works
         #[cfg(not(target_arch = "wasm32"))]
@@ -547,11 +583,24 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: {
             let vb = egui::ViewportBuilder::default().with_inner_size([1440.0, 900.0]).with_min_inner_size([360.0, 480.0]).with_title("BurnCraft").with_app_id("org.burncraft.BurnCraft");
+            // BurnCraft's own title row (window buttons on the tab row) unless the system one is chosen. On macOS the
+            // title bar turns see-through and the content runs under it, keeping the usual window buttons.
+            let own_bar = !settings::Settings::load().system_title_bar;
+            let vb = if !own_bar {
+                vb
+            } else if cfg!(target_os = "macos") {
+                vb.with_titlebar_shown(false).with_title_shown(false).with_fullsize_content_view(true)
+            } else {
+                vb.with_decorations(false)
+            };
             match ribbon::window_icon() {
                 Some(icon) => vb.with_icon(std::sync::Arc::new(icon)),
                 None => vb,
             }
         },
+        // BurnCraft handles Ctrl+C / X / V itself (see raw_input_hook): egui's own handling sends nothing when
+        // its clipboard reader sees the clipboard as empty (common on Wayland), so pasting shapes did nothing
+        clipboard_shortcuts: false,
         ..Default::default()
     };
     eframe::run_native("BurnCraft", options, Box::new(move |_cc| Ok(Box::new(Root::new(screenshot, open)))))

@@ -60,17 +60,45 @@ impl Units {
     }
     fn drag<'a>(self, v: &'a mut f64, lo: f64, hi: f64, speed: f64, unit: &str) -> egui::DragValue<'a> {
         let f = self.factor();
-        egui::DragValue::from_get_set(move |n| {
+        typed(egui::DragValue::from_get_set(move |n| {
             if let Some(n) = n {
                 *v = n / f;
             }
             *v * f
-        })
+        }))
         .range(lo * f..=hi * f)
         .speed(speed * f)
         .max_decimals(if self == Units::Mm { 2 } else { 4 })
         .suffix(format!(" {unit}"))
     }
+}
+
+/// A number box. What you type is kept exactly as typed until Enter, Tab or clicking elsewhere (it isn't
+/// rebuilt from the value on every key), and a comma works as the decimal point.
+pub fn num<'a, N: egui::emath::Numeric>(v: &'a mut N) -> egui::DragValue<'a> {
+    typed(egui::DragValue::new(v))
+}
+
+fn typed(d: egui::DragValue<'_>) -> egui::DragValue<'_> {
+    d.update_while_editing(false).custom_parser(parse_number)
+}
+
+/// A typed number: "225.5", "0.25", ".5", "1,5", "-3", with spaces, a unit or a % sign around it ignored.
+pub fn parse_number(text: &str) -> Option<f64> {
+    let t: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(|c| match c {
+            '−' => '-',
+            ',' => '.',
+            c => c,
+        })
+        .collect();
+    // drop a unit written after the number (mm, in, mm/s, %, °…)
+    let end = t.find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')).unwrap_or(t.len());
+    let n = &t[..end];
+    let n = if n.starts_with('.') { format!("0{n}") } else if n.starts_with("-.") { format!("-0{}", &n[1..]) } else { n.to_string() };
+    n.parse::<f64>().ok().filter(|v| v.is_finite())
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +139,13 @@ pub struct Settings {
     pub ribbon_labels: bool,
     /// Two rows of small buttons per group (CAD-style) instead of one row of large ones.
     pub ribbon_compact: bool,
+    /// Which point of the selection the X / Y boxes in Properties show and set: [0 left, 1 centre, 2 right;
+    /// 0 bottom, 1 middle, 2 top]. Bottom-left by default, the bed's origin corner.
+    pub anchor: [u8; 2],
+    /// Show the welcome window when the project is empty.
+    pub show_welcome: bool,
+    /// Use the system's window title bar instead of BurnCraft's own (window buttons on the tab row).
+    pub system_title_bar: bool,
     /// The Welcome Tour has been seen (finished or skipped), so it doesn't start by itself again.
     pub tour_done: bool,
     /// Camera source and alignment.
@@ -199,6 +234,9 @@ impl Default for Settings {
             filled_view: false,
             ribbon_labels: true,
             ribbon_compact: true,
+            anchor: [0, 0],
+            show_welcome: true,
+            system_title_bar: false,
             tour_done: false,
             camera: Default::default(),
             check_updates: true,
@@ -272,6 +310,9 @@ impl Settings {
             "filled_view": self.filled_view,
             "ribbon_labels": self.ribbon_labels,
             "ribbon_compact": self.ribbon_compact,
+            "anchor": self.anchor,
+            "show_welcome": self.show_welcome,
+            "system_title_bar": self.system_title_bar,
             "tour_done": self.tour_done,
             "camera": serde_json::to_value(&self.camera).unwrap_or(Value::Null),
             "check_updates": self.check_updates,
@@ -348,6 +389,11 @@ impl Settings {
         s.filled_view = b(v, "filled_view").unwrap_or(s.filled_view);
         s.ribbon_labels = b(v, "ribbon_labels").unwrap_or(true);
         s.ribbon_compact = b(v, "ribbon_compact").unwrap_or(s.ribbon_compact);
+        if let Some(a) = v.get("anchor").and_then(|a| serde_json::from_value::<[u8; 2]>(a.clone()).ok()) {
+            s.anchor = [a[0].min(2), a[1].min(2)];
+        }
+        s.show_welcome = b(v, "show_welcome").unwrap_or(s.show_welcome);
+        s.system_title_bar = b(v, "system_title_bar").unwrap_or(s.system_title_bar);
         s.tour_done = b(v, "tour_done").unwrap_or(s.tour_done);
         if let Some(c) = v.get("camera").and_then(|c| serde_json::from_value(c.clone()).ok()) {
             s.camera = c;
@@ -379,5 +425,23 @@ impl Settings {
         self.recent.retain(|r| r != path);
         self.recent.insert(0, path.to_string());
         self.recent.truncate(10);
+    }
+}
+
+#[cfg(test)]
+mod number_tests {
+    use super::*;
+    #[test]
+    fn typed_numbers_in_mm_and_inches() {
+        for (t, v) in [("225.5", 225.5), ("0.25", 0.25), (".5", 0.5), ("1,5", 1.5), ("-.5", -0.5), ("−3", -3.0), (" 12 mm", 12.0), ("2.5in", 2.5), ("35 %", 35.0), ("1e2", 100.0)] {
+            assert_eq!(parse_number(t), Some(v), "{t}");
+        }
+        assert_eq!(parse_number("abc"), None);
+        assert_eq!(parse_number(""), None);
+        // a value typed in inches is stored in mm and shows the same digits again
+        let u = Units::Inch;
+        let mm = parse_number("2,25").unwrap() / u.factor();
+        assert!((mm - 57.15).abs() < 1e-9);
+        assert_eq!(u.round(mm), 2.25);
     }
 }
