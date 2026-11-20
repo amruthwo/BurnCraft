@@ -80,7 +80,7 @@ const STEPS: &[Step] = &[
     },
     Step {
         title: "Burning a job",
-        body: "The Laser tab: Preview shows the laser's path and how long it will take, Save G-code writes a file, and Start burns on a connected laser.\n\nSet up your machine in Settings — or import a LightBurn device profile (.lbdev).",
+        body: "The Laser tab: the Preview group (Preview, Play Preview, Frame) never burns: it shows the laser's path and how long it will take. The Burn group (Start, Pause, Stop) fires the laser. Save G-code writes a file.\n\nSet up your machine in Settings — or import a LightBurn device profile (.lbdev).",
         target: &["ribbon_groups"],
         tab: Some(RibbonTab::Laser),
         side: None,

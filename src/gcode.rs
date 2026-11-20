@@ -622,7 +622,14 @@ pub fn frame_gcode(job: &Job, rapid_speed: f64) -> Option<Vec<String>> {
 /// `$J=G91` jog) are checked from `pos`, the head's last known position, and only refused when they take the
 /// head further outside (so it can always be jogged back in). `check_y` is false when a rotary turns
 /// instead of Y. Inches (G20) are understood.
+#[cfg(test)]
 pub fn check_moves(lines: &[String], w: f64, h: f64, check_y: bool, pos: Option<(f64, f64)>) -> Result<(), String> {
+    check_moves_from(lines, w, h, check_y, pos, (0.0, 0.0))
+}
+
+/// The same, when the work origin (0, 0) has been moved to `origin` on the bed (G92 "Set origin here"): the
+/// moves are checked against the real bed. `pos` is the head's position on the bed.
+pub fn check_moves_from(lines: &[String], w: f64, h: f64, check_y: bool, pos: Option<(f64, f64)>, origin: (f64, f64)) -> Result<(), String> {
     const EPS: f64 = 0.001;
     let outside = |v: f64, max: f64| v < -EPS || v > max + EPS;
     // how far outside 0..=max a value is
@@ -677,6 +684,7 @@ pub fn check_moves(lines: &[String], w: f64, h: f64, check_y: bool, pos: Option<
         let (x, y) = (x.map(|v| v * k), y.map(|v| v * k));
         let refuse = || Err("This would move outside the work area, so it wasn't sent. Check the work area size in Settings and that nothing is off the bed.".to_string());
         if l_abs {
+            let (x, y) = (x.map(|v| v + origin.0), y.map(|v| v + origin.1));
             if x.is_some_and(|v| outside(v, w)) || (check_y && y.is_some_and(|v| outside(v, h))) {
                 return refuse();
             }
@@ -882,6 +890,19 @@ mod tests {
                 assert!(job.gcode.contains("S600"), "{mode:?}");
             }
         }
+    }
+    #[test]
+    fn a_moved_origin_is_checked_against_the_real_bed() {
+        let s = |v: &[&str]| v.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+        // origin moved to (300, 50) on a 400 × 400 bed: X 0..100 still fits, X 150 would be at 450
+        let o = (300.0, 50.0);
+        assert!(check_moves_from(&s(&["G90", "G1 X100 Y100"]), 400.0, 400.0, true, None, o).is_ok());
+        assert!(check_moves_from(&s(&["G90", "G1 X150 Y100"]), 400.0, 400.0, true, None, o).is_err());
+        // negative work coordinates are fine while they stay on the bed
+        assert!(check_moves_from(&s(&["G90", "G1 X-250 Y-40"]), 400.0, 400.0, true, None, o).is_ok());
+        assert!(check_moves_from(&s(&["G90", "G1 X-310 Y0"]), 400.0, 400.0, true, None, o).is_err());
+        // jogs are checked from the head's place on the bed
+        assert!(check_moves_from(&s(&["$J=G91 X20"]), 400.0, 400.0, true, Some((390.0, 60.0)), o).is_err());
     }
     #[test]
     fn moves_outside_the_work_area_are_refused() {

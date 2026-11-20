@@ -78,15 +78,15 @@ actions! {
     ZoomSelection: "Fit Selection", ZoomSel, "View", "Zoom to the selection", ["Ctrl+Shift+A"], ["Shift+F"];
     ToggleFilled: "Filled View", Filled, "View", "Show closed shapes filled", [], [];
     ToggleGrid: "Grid", Grid, "View", "Show the grid", [], ["G"];
-    Preview: "Preview", Preview, "Laser", "Show the laser path and time estimate", ["Alt+P"], ["Alt+P"];
+    Preview: "Preview", Preview, "Laser", "Show the laser path and time estimate on screen: nothing burns", ["Alt+P"], ["Alt+P"];
     TraceImage: "Trace Image", Trace, "Image", "Turn an image into vector outlines", ["Alt+T"], ["Alt+T"];
     TraceMcp: "AI Outline (MCP)", Mcp, "Image", "Ask an MCP tool (for example an AI model) to find outlines in the image", [], [];
     ImageInvert: "Invert", Invert, "Image", "Swap light and dark", [], [];
     ImageReset: "Reset Adjust", Reset, "Image", "Reset brightness, contrast and gamma", [], [];
     LaserConnect: "Connect", Connect, "Laser", "Connect to a GRBL laser over USB/serial", [], [];
     LaserHome: "Home", Home, "Laser", "Send the laser to its home position ($H)", [], [];
-    LaserFrame: "Frame", Frame, "Laser", "Trace the job outline with the laser off", [], [];
-    LaserStart: "Start", Start, "Laser", "Start burning", ["Alt+Shift+S"], ["Alt+Shift+S"];
+    LaserFrame: "Frame", Frame, "Laser", "Move the head around the job outline with the laser off: nothing burns", [], [];
+    LaserStart: "Start", Start, "Laser", "Start burning: the laser fires and burns the job", ["Alt+Shift+S"], ["Alt+Shift+S"];
     LaserPause: "Pause", Pause, "Laser", "Pause / resume", [], [];
     LaserStop: "Stop", Stop, "Laser", "Stop now", ["Ctrl+Cancel"], [];
     ToolPen: "Pen / Curve", Pen, "Sketch", "Click for sharp points, click-and-drag for smooth curves. Enter or double-click finishes, click the first point to close", [], ["B"];
@@ -114,7 +114,7 @@ actions! {
     ToolLasso: "Lasso", Lasso, "Image", "Draw around part of an image to select it; Magnetic snaps to edges. Shift adds, Alt subtracts", [], ["Shift+L"];
     SelectionToPath: "Selection to Outline", SelOutline, "Image", "Turn the image selection into a vector outline", [], [];
     ClearSelection: "Clear Selection", Reset, "Image", "Drop the image selection", [], [];
-    PreviewPlay: "Play Preview", Start, "Laser", "Animate the laser path in the preview", [], [];
+    PreviewPlay: "Play Preview", PlayPreview, "Laser", "Animate the laser path on screen: nothing burns", [], [];
     InvertBed: "Invert Bed", Invert, "View", "Swap light and dark on the bed, to check designs for dark materials", [], [];
     SaveLayerDefaults: "Save Layer Defaults", Layers, "Laser", "Use this project's layer settings for every new project", [], [];
     VariableText: "Variable Text", VarText, "Laser", "Fill text from a .csv / .txt file, a serial number or the date, a new row each job", [], [];

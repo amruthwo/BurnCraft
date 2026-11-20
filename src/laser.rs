@@ -22,7 +22,8 @@ pub enum Event {
     Connected(String),
     Disconnected(String),
     Line(String),
-    Status { state: String, x: f64, y: f64 },
+    /// `machine`: the position is the machine's own (MPos), not relative to a moved origin (WPos).
+    Status { state: String, x: f64, y: f64, machine: bool },
     Progress { sent: usize, total: usize },
 }
 
@@ -38,6 +39,11 @@ pub struct Laser {
     pub homed: bool,
     /// The "not homed yet" warning was shown for this connection.
     pub home_warned: bool,
+    /// Where the work origin (0, 0) is on the bed: (0, 0) unless "Set origin here" moved it; None when it was
+    /// moved before the position was known (not homed), so the bed check can't be exact.
+    pub origin: Option<(f64, f64)>,
+    /// The last position reported was the machine's own (MPos).
+    pub machine_pos: bool,
 }
 
 impl Default for Laser {
@@ -54,7 +60,7 @@ impl Laser {
         std::thread::Builder::new().name("laser-io".into()).spawn(move || worker(crx, etx)).ok();
         #[cfg(target_arch = "wasm32")]
         drop((crx, etx));
-        Laser { tx, rx, connected: false, state: "Not connected".into(), pos: (0.0, 0.0), console: VecDeque::new(), progress: (0, 0), homed: false, home_warned: false }
+        Laser { tx, rx, connected: false, state: "Not connected".into(), pos: (0.0, 0.0), console: VecDeque::new(), progress: (0, 0), homed: false, home_warned: false, origin: Some((0.0, 0.0)), machine_pos: true }
     }
 
     pub fn send(&self, c: Cmd) {
@@ -78,6 +84,7 @@ impl Laser {
                     self.connected = true;
                     self.homed = false;
                     self.home_warned = false;
+                    self.origin = Some((0.0, 0.0));
                     self.state = "Connected".into();
                     self.log(format!("Connected to {p}"));
                 }
@@ -87,9 +94,10 @@ impl Laser {
                     self.log(why);
                 }
                 Event::Line(l) => self.log(l),
-                Event::Status { state, x, y } => {
+                Event::Status { state, x, y, machine } => {
                     self.state = state;
                     self.pos = (x, y);
+                    self.machine_pos = machine;
                 }
                 Event::Progress { sent, total } => self.progress = (sent, total),
             }
@@ -225,16 +233,21 @@ pub fn parse_status(line: &str) -> Option<Event> {
     let state = parts.next()?.to_string();
     let mut x = 0.0;
     let mut y = 0.0;
+    let mut machine = true;
     for p in parts {
-        if let Some(v) = p.strip_prefix("MPos:").or_else(|| p.strip_prefix("WPos:")) {
-            let n: Vec<f64> = v.split(',').filter_map(|s| s.parse().ok()).collect();
-            if n.len() >= 2 {
-                x = n[0];
-                y = n[1];
-            }
+        let (v, m) = match (p.strip_prefix("MPos:"), p.strip_prefix("WPos:")) {
+            (Some(v), _) => (v, true),
+            (_, Some(v)) => (v, false),
+            _ => continue,
+        };
+        let n: Vec<f64> = v.split(',').filter_map(|s| s.parse().ok()).collect();
+        if n.len() >= 2 {
+            x = n[0];
+            y = n[1];
+            machine = m;
         }
     }
-    Some(Event::Status { state, x, y })
+    Some(Event::Status { state, x, y, machine })
 }
 
 #[cfg(test)]
@@ -242,9 +255,10 @@ mod tests {
     #[test]
     fn status() {
         match super::parse_status("<Run|MPos:10.5,20.25,0.000|FS:500,0>") {
-            Some(super::Event::Status { state, x, y }) => {
+            Some(super::Event::Status { state, x, y, machine }) => {
                 assert_eq!(state, "Run");
                 assert_eq!((x, y), (10.5, 20.25));
+                assert!(machine);
             }
             _ => panic!(),
         }

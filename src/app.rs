@@ -949,8 +949,15 @@ impl App {
     pub fn send_gcode(&mut self, lines: Vec<String>, now: f64) -> bool {
         let d = &self.settings.device;
         let check_y = !(self.rotary_on() && d.rotary.axis == crate::rotary::RotaryAxis::Y);
-        let pos = self.laser.homed.then_some(self.laser.pos);
-        match gcode::check_moves(&lines, d.width, d.height, check_y, pos) {
+        // after "Set origin here" the job's 0,0 isn't the bed's: check against the real bed
+        let origin = self.laser.origin;
+        if origin.is_none() {
+            self.error("The origin was moved (Set origin here) before the laser was homed, so BurnCraft can't check that this stays on the bed. Make sure the job fits from where the head is, or press Clear origin.", now);
+        }
+        let o = origin.unwrap_or((0.0, 0.0));
+        let pos = (self.laser.homed && origin.is_some()).then(|| if self.laser.machine_pos { self.laser.pos } else { (self.laser.pos.0 + o.0, self.laser.pos.1 + o.1) });
+        let d = &self.settings.device;
+        match gcode::check_moves_from(&lines, d.width, d.height, check_y, pos, o) {
             Ok(()) => {
                 self.laser.send(Cmd::Send(lines));
                 true
@@ -959,6 +966,21 @@ impl App {
                 self.error(e, now);
                 false
             }
+        }
+    }
+
+    /// "Set origin here" (G92 X0 Y0): jobs then start from where the head is. BurnCraft remembers where that is on
+    /// the bed (when the laser has been homed), so the work-area check still uses the real bed.
+    pub fn set_origin_here(&mut self, now: f64) {
+        self.laser.send(Cmd::Send(vec!["G92 X0 Y0".into()]));
+        if self.laser.homed {
+            let o = self.laser.origin.unwrap_or((0.0, 0.0));
+            let here = if self.laser.machine_pos { self.laser.pos } else { (self.laser.pos.0 + o.0, self.laser.pos.1 + o.1) };
+            self.laser.origin = Some(here);
+            self.toast("Origin set here: jobs start from this point, and BurnCraft still keeps them on the bed.", now);
+        } else {
+            self.laser.origin = None;
+            self.error("Origin set, but the laser hasn't been homed, so BurnCraft can't tell where this is on the bed and can't fully check that jobs stay on it. Home first if your laser has home switches.", now);
         }
     }
 

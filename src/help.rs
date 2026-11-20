@@ -162,7 +162,7 @@ pub fn window(ctx: &Context, app: &mut App) {
     }
     let mut open = true;
     let mut tour = false;
-    egui::Window::new("Help").open(&mut open).default_size(vec2(780.0, 560.0)).min_width(680.0).resizable(true).collapsible(false).show(ctx, |ui| {
+    egui::Window::new("Help").open(&mut open).default_size(vec2(780.0, 560.0)).min_width(480.0).max_height(crate::dialogs::fit_h(ctx)).max_width(crate::dialogs::fit_w(ctx)).resizable(true).collapsible(false).show(ctx, |ui| {
         let col = theme::colors(ui.visuals().dark_mode);
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut app.help_search).hint_text("Search help").desired_width(220.0));

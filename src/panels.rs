@@ -467,7 +467,7 @@ fn properties(ui: &mut Ui, app: &mut App) {
             let before = spec.clone();
             ui.horizontal(|ui| {
                 ui.label("Font");
-                if ui.button(format!("{}  ▾", spec.label())).on_hover_text("Choose from the fonts installed on this computer").clicked() {
+                if ui.button(format!("{} …", spec.label())).on_hover_text("Choose from the fonts installed on this computer").clicked() {
                     app.canvas.font_list_open = !app.canvas.font_list_open;
                     app.canvas.font_cursor = None;
                     app.canvas.font_list_new = true;
@@ -680,8 +680,8 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
                 ui.label(RichText::new(format!("{} shape(s) outside the bed are left out of the job.", job.skipped_outside)).color(Color32::from_rgb(235, 90, 80)));
             }
             ui.horizontal(|ui| {
-                let label = if app.preview_playing { "Pause" } else { "Play" };
-                if ui.add(egui::Button::new(RichText::new(label).strong()).min_size(vec2(64.0, 26.0))).on_hover_text("Simulate the laser moving along the path").clicked() {
+                let label = if app.preview_playing { "Pause preview" } else { "Play preview" };
+                if ui.add(egui::Button::new(RichText::new(label).strong()).min_size(vec2(64.0, 26.0))).on_hover_text("Animate the laser path on screen: nothing burns").clicked() {
                     if !app.preview_playing && app.preview_t >= 0.999 {
                         app.preview_t = 0.0;
                     }
@@ -868,16 +868,33 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
         let now = ui.input(|i| i.time);
         app.send_gcode(vec![format!("$J=G91 G21 X{dx:.3} Y{dy:.3} F3000")], now);
     }
+    // Frame (nothing burns) kept apart from the controls that fire the laser
     ui.horizontal(|ui| {
-        for a in [Action::LaserFrame, Action::LaserStart, Action::LaserPause, Action::LaserStop] {
-            if ui.add_enabled(app.enabled(a), egui::Button::new(a.label())).on_hover_text(app.tooltip(a)).clicked() {
+        let a = Action::LaserFrame;
+        if ui.add_enabled(app.enabled(a), egui::Button::new(a.label())).on_hover_text(app.tooltip(a)).clicked() {
+            run.push(a);
+        }
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(10.0);
+        for a in [Action::LaserStart, Action::LaserPause, Action::LaserStop] {
+            let b = if a == Action::LaserStart {
+                egui::Button::new(RichText::new("Start").strong().color(Color32::WHITE)).fill(Color32::from_rgb(200, 70, 30))
+            } else {
+                egui::Button::new(a.label())
+            };
+            if ui.add_enabled(app.enabled(a), b).on_hover_text(app.tooltip(a)).clicked() {
                 run.push(a);
             }
         }
     });
     ui.horizontal(|ui| {
-        if ui.button("Set origin here").on_hover_text("G92 X0 Y0").clicked() {
-            app.laser.send(Cmd::Send(vec!["G92 X0 Y0".into()]));
+        if ui.button("Set origin here").on_hover_text("G92 X0 Y0: jobs start from where the head is now. BurnCraft still keeps them on the bed if the laser was homed first.").clicked() {
+            app.set_origin_here(ui.input(|i| i.time));
+        }
+        if app.laser.origin != Some((0.0, 0.0)) && ui.button("Clear origin").on_hover_text("G92.1: back to the bed's own 0,0").clicked() {
+            app.laser.send(Cmd::Send(vec!["G92.1".into()]));
+            app.laser.origin = Some((0.0, 0.0));
         }
         if ui.button("Unlock").on_hover_text("$X — clear an alarm").clicked() {
             app.laser.send(Cmd::Send(vec!["$X".into()]));

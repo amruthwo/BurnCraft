@@ -14,7 +14,7 @@ Align, distribute, centre on the bed, bring to front or send to back, group and 
 
 **Arrange > Nest** moves and turns the selected shapes so they fit tightly together, to save material.
 
-- **Sheet**: pack onto the **work area**, or into **another shape** — an offcut you traced, or a rectangle you drew. Select that shape last and choose *Last selected shape*. It stays where it is, and its holes are avoided.
+- **Sheet**: pack onto the **work area**, or into **another shape** — an offcut you traced, or a rectangle you drew. Select that shape last and choose **Last selected shape**. It stays where it is, and its holes are avoided.
 - **Spacing**: the smallest gap between two parts. **Margin**: the smallest gap from the sheet's edge. Allow for the laser's kerf.
 - **Rotations**: none, 90° steps, or every so many degrees. More angles can pack tighter but take longer.
 - **Mirroring**: allows flipping parts over (off by default — leave it off if the material has a good side).

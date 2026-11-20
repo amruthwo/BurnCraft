@@ -81,11 +81,35 @@ impl Root {
             app.ribbon_tab = app::RibbonTab::ALL.into_iter().find(|t| t.label().to_ascii_lowercase() == tab).unwrap_or(app::RibbonTab::Home);
             app.settings.theme = settings::Theme::Dark;
             app.settings.ui_scale = 1.0;
+            app.side_tab = app::SideTab::Layers;
             app.settings.filled_view = true;
             app.side_tab = app::SideTab::Layers;
             app.current_layer = 1;
             // BURNCRAFT_TOUR=<step> shows that tour step, BURNCRAFT_HELP=<topic> the Help window
             app.tour = std::env::var("BURNCRAFT_TOUR").ok().and_then(|v| v.parse().ok());
+            // BURNCRAFT_TOOL=wand (lasso, line, rect, text, nodes…) shows that tool's options bar
+            if let Ok(t) = std::env::var("BURNCRAFT_TOOL") {
+                let tool = match t.as_str() {
+                    "wand" => Some(app::Tool::Wand),
+                    "lasso" => Some(app::Tool::Lasso),
+                    "line" => Some(app::Tool::Line),
+                    "rect" => Some(app::Tool::Rect),
+                    "text" => Some(app::Tool::Text),
+                    "nodes" => Some(app::Tool::Nodes),
+                    "polygon" => Some(app::Tool::Polygon),
+                    "star" => Some(app::Tool::Star),
+                    "fillet" => Some(app::Tool::Fillet),
+                    "arc" => Some(app::Tool::Arc),
+                    _ => None,
+                };
+                if let Some(tool) = tool {
+                    app.tool = tool;
+                }
+            }
+            // BURNCRAFT_SCALE=1.25 shows the interface at that size
+            if let Some(s) = std::env::var("BURNCRAFT_SCALE").ok().and_then(|v| v.parse::<f32>().ok()) {
+                app.settings.ui_scale = s;
+            }
             // BURNCRAFT_UNITS=in shows the screenshot in inches
             if std::env::var("BURNCRAFT_UNITS").is_ok_and(|v| v == "in") {
                 app.settings.units = settings::Units::Inch;
@@ -582,7 +606,12 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport: {
-            let vb = egui::ViewportBuilder::default().with_inner_size([1440.0, 900.0]).with_min_inner_size([360.0, 480.0]).with_title("BurnCraft").with_app_id("org.burncraft.BurnCraft");
+            // BURNCRAFT_SIZE=1366x768 sets the window size (for checking small screens in screenshots)
+            let size = std::env::var("BURNCRAFT_SIZE").ok().and_then(|v| {
+                let (w, h) = v.split_once('x')?;
+                Some([w.parse::<f32>().ok()?, h.parse::<f32>().ok()?])
+            });
+            let vb = egui::ViewportBuilder::default().with_inner_size(size.unwrap_or([1440.0, 900.0])).with_min_inner_size([360.0, 480.0]).with_title("BurnCraft").with_app_id("org.burncraft.BurnCraft");
             // BurnCraft's own title row (window buttons on the tab row) unless the system one is chosen. On macOS the
             // title bar turns see-through and the content runs under it, keeping the usual window buttons.
             let own_bar = !settings::Settings::load().system_title_bar;

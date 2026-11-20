@@ -34,7 +34,7 @@ fn shortcuts(ctx: &Context, app: &mut App) {
         return;
     }
     let mut open = true;
-    egui::Window::new("Keyboard shortcuts").open(&mut open).default_size(vec2(620.0, 560.0)).resizable(true).show(ctx, |ui| {
+    egui::Window::new("Keyboard shortcuts").open(&mut open).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_size(vec2(620.0, 560.0)).resizable(true).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label("Starting point:");
             for p in [Preset::Cad, Preset::LightBurn] {
@@ -153,7 +153,7 @@ fn settings(ctx: &Context, app: &mut App) {
     let mut replay = false;
     let u = app.settings.units;
     // scrolls when it's taller than the screen (small laptop screens)
-    egui::Window::new("Settings").open(&mut open).default_width(460.0).default_height(ctx.content_rect().height() - 120.0).vscroll(true).show(ctx, |ui| {
+    egui::Window::new("Settings").open(&mut open).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(460.0).default_height(ctx.content_rect().height() - 120.0).vscroll(true).show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Getting started").strong());
             replay = ui.button("Replay Welcome Tour").on_hover_text("Walk through the window again, step by step").clicked();
@@ -458,7 +458,7 @@ fn trace(ctx: &Context, app: &mut App) {
     }
     let mut open = true;
     let mut accept = false;
-    egui::Window::new("Trace Image").open(&mut open).default_width(380.0).show(ctx, |ui| {
+    egui::Window::new("Trace Image").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(380.0).show(ctx, |ui| {
         // live preview inside the window
         if let Some(tex) = &app.trace.thumb {
             let (iw, ih) = app.trace.thumb_size;
@@ -632,7 +632,7 @@ fn mcp(ctx: &Context, app: &mut App) {
     let mut start = false;
     let mut accept = false;
     let mut save = false;
-    egui::Window::new("AI Outline").open(&mut open).default_width(420.0).show(ctx, |ui| {
+    egui::Window::new("AI Outline").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(420.0).show(ctx, |ui| {
         ui.label("Send the selected image to your AI tool and get back vector outlines.");
         ui.add_space(4.0);
         save |= ai_settings_ui(ui, app);
@@ -774,7 +774,7 @@ fn notes(ctx: &Context, app: &mut App) {
         return;
     }
     let mut open = true;
-    egui::Window::new("Project notes").open(&mut open).default_size(vec2(360.0, 240.0)).show(ctx, |ui| {
+    egui::Window::new("Project notes").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_size(vec2(360.0, 240.0)).show(ctx, |ui| {
         if ui.add(egui::TextEdit::multiline(&mut app.doc.notes).desired_width(f32::INFINITY).desired_rows(10)).changed() {
             app.dirty = true;
         }
@@ -792,7 +792,7 @@ fn array(ctx: &Context, app: &mut App) {
     let mut open = true;
     let mut go = false;
     let editing = app.array_edit.is_some();
-    egui::Window::new(if editing { "Edit Grid Array" } else { "Grid Array" }).open(&mut open).show(ctx, |ui| {
+    egui::Window::new(if editing { "Edit Grid Array" } else { "Grid Array" }).open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).show(ctx, |ui| {
         // the size of what is being copied (the array's originals when editing)
         let src: Vec<usize> = match app.array_edit.and_then(|ai| app.doc.arrays.get(ai)) {
             Some(a) => a.sources.iter().filter_map(|id| app.doc.shapes.iter().position(|s| s.id == *id)).collect(),
@@ -858,7 +858,7 @@ fn offset(ctx: &Context, app: &mut App) {
     let mut open = true;
     let mut go = false;
     let before = app.offset_opts;
-    egui::Window::new("Offset Shapes").open(&mut open).default_width(300.0).show(ctx, |ui| {
+    egui::Window::new("Offset Shapes").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(300.0).show(ctx, |ui| {
         let o = &mut app.offset_opts;
         egui::Grid::new("off").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
             ui.label("Distance");
@@ -936,7 +936,7 @@ fn circular(ctx: &Context, app: &mut App) {
     let mut open = true;
     let mut go = false;
     let editing = app.array_edit.is_some();
-    egui::Window::new(if editing { "Edit Circular Array" } else { "Circular Array" }).open(&mut open).default_width(300.0).show(ctx, |ui| {
+    egui::Window::new(if editing { "Edit Circular Array" } else { "Circular Array" }).open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(300.0).show(ctx, |ui| {
         let (count, span, rotate, center) = &mut app.circular;
         egui::Grid::new("circ").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
             ui.label("Copies (total)");
@@ -993,7 +993,7 @@ fn along_curve(ctx: &Context, app: &mut App) {
     let mut open = true;
     let mut go = false;
     let title = if app.curve_dlg.0 { "Align to Path" } else { "Pattern on Path" };
-    egui::Window::new(title).open(&mut open).default_width(320.0).show(ctx, |ui| {
+    egui::Window::new(title).open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(320.0).show(ctx, |ui| {
         let (align, _, rotate, anchor) = &mut app.curve_dlg;
         let pc = &mut app.path_copy;
         ui.horizontal(|ui| {
@@ -1065,7 +1065,7 @@ fn barcode(ctx: &Context, app: &mut App) {
     let u = app.settings.units;
     let mut open = true;
     let mut add = false;
-    egui::Window::new("Barcode / QR Code").open(&mut open).default_width(360.0).show(ctx, |ui| {
+    egui::Window::new("Barcode / QR Code").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(360.0).show(ctx, |ui| {
         let st = &mut app.barcode;
         ui.horizontal_wrapped(|ui| {
             for k in Kind::ALL {
@@ -1186,7 +1186,7 @@ fn nest(ctx: &Context, app: &mut App) {
     let progress = app.nest_job.as_ref().map(|j| (j.progress(), j.stopping()));
     let stale = app.nest_result.as_ref().map(|(_, rev)| *rev != app.rev).unwrap_or(false);
     let n_sel = app.sel.len();
-    egui::Window::new("Nest").open(&mut open).default_width(440.0).show(ctx, |ui| {
+    egui::Window::new("Nest").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(440.0).show(ctx, |ui| {
         ui.label(RichText::new("Select the shapes to nest. To nest into another shape (an offcut, or a rectangle you drew), select it last and choose \u{201c}Last selected shape\u{201d}.").size(11.5).weak());
         let s = &mut app.settings.nest;
         egui::Grid::new("nest").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
@@ -1329,7 +1329,7 @@ fn rotary(ctx: &Context, app: &mut App) {
     let galvo = app.settings.device.controller == crate::gcode::Controller::EzCad2;
     let gcode = app.settings.device.controller.family() == crate::gcode::Family::GCode;
     let warnings = crate::rotary::warnings(&app.doc, &app.settings.device.rotary, app.settings.units);
-    egui::Window::new("Rotary").open(&mut open).default_width(460.0).show(ctx, |ui| {
+    egui::Window::new("Rotary").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(460.0).show(ctx, |ui| {
         let r = &mut app.settings.device.rotary;
         save |= ui.checkbox(&mut r.enabled, RichText::new("Use the rotary for jobs").strong()).changed();
         if galvo {
@@ -1480,7 +1480,7 @@ fn vartext(ctx: &Context, app: &mut App) {
     let mut load = false;
     let mut insert: Option<String> = None;
     let now = ctx.input(|i| i.time);
-    egui::Window::new("Variable Text").open(&mut open).default_width(540.0).show(ctx, |ui| {
+    egui::Window::new("Variable Text").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(540.0).show(ctx, |ui| {
         ui.label(RichText::new("Text shapes with \u{201c}Variable text\u{201d} ticked (in Properties) fill in their placeholders from the current row.").size(12.0));
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -1617,7 +1617,7 @@ fn camera(ctx: &Context, app: &mut App) {
     let mut photo = false;
     let now = ctx.input(|i| i.time);
     let (bw, bh) = (app.settings.device.width, app.settings.device.height);
-    egui::Window::new("Camera").open(&mut open).default_width(580.0).show(ctx, |ui| {
+    egui::Window::new("Camera").open(&mut open).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(580.0).show(ctx, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label("Source");
             #[cfg(not(target_arch = "wasm32"))]
@@ -1754,4 +1754,15 @@ fn camera(ctx: &Context, app: &mut App) {
         app.win_camera = false;
         app.camera_pick = None;
     }
+}
+
+/// The tallest a window may be: the screen's height less a margin, so it never runs off the bottom
+/// (it scrolls inside instead).
+pub fn fit_h(ctx: &Context) -> f32 {
+    (ctx.content_rect().height() - 40.0).max(200.0)
+}
+
+/// The widest a window may be.
+pub fn fit_w(ctx: &Context) -> f32 {
+    (ctx.content_rect().width() - 20.0).max(240.0)
 }

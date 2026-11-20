@@ -16,7 +16,7 @@ pub enum Icon {
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
     Pen, Arc, Star, Trim, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
-    Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary, Nest,
+    Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary, Nest, PlayPreview,
 }
 
 pub struct Pal {
@@ -441,7 +441,18 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             dot(0.12, 0.12, 0.06, pal.fg);
         }
         Icon::Start => {
-            closed(&[(0.28, 0.14), (0.84, 0.5), (0.28, 0.86)], pal.accent, ac);
+            // the only "fire" control: a solid triangle in the warning colour, with a spark
+            let fire = Color32::from_rgb(235, 90, 35);
+            closed(&[(0.24, 0.14), (0.8, 0.5), (0.24, 0.86)], fire, Stroke::new(w, fire));
+            line(&[(0.86, 0.12), (0.94, 0.04)], Stroke::new(w * 0.8, fire));
+            line(&[(0.9, 0.24), (0.99, 0.22)], Stroke::new(w * 0.8, fire));
+        }
+        Icon::PlayPreview => {
+            // a play triangle on a screen: only animates the preview
+            rs(rect_at(0.06, 0.14, 0.94, 0.74), st);
+            line(&[(0.36, 0.88), (0.64, 0.88)], st);
+            line(&[(0.5, 0.74), (0.5, 0.88)], thin);
+            closed(&[(0.4, 0.28), (0.66, 0.44), (0.4, 0.6)], Color32::TRANSPARENT, st);
         }
         Icon::Pause => {
             rf(rect_at(0.24, 0.16, 0.42, 0.84), pal.accent);

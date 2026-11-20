@@ -18,7 +18,8 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Clipboard", vec![Paste, Copy, Cut, Duplicate, Delete]),
             ("Draw", vec![ToolSelect, ToolLine, ToolRect, ToolEllipse, ToolText]),
             ("Arrange", vec![Group, Ungroup, PageCenter]),
-            ("Burn", vec![Preview, LaserFrame, LaserStart, ExportGcode]),
+            ("Preview", vec![Preview, PreviewPlay, LaserFrame]),
+            ("Burn", vec![LaserStart, ExportGcode]),
         ],
         RibbonTab::Sketch => vec![
             ("Select", vec![ToolSelect, ToolPan, SelectAll]),
@@ -48,7 +49,9 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
         ],
         RibbonTab::Laser => vec![
             ("Machine", vec![LaserConnect, LaserHome]),
-            ("Job", vec![Preview, PreviewPlay, LaserFrame, LaserStart, LaserPause, LaserStop]),
+            // nothing burns in Preview; Burn fires the laser (kept apart so they aren't confused)
+            ("Preview", vec![Preview, PreviewPlay, LaserFrame]),
+            ("Burn", vec![LaserStart, LaserPause, LaserStop]),
             ("Output", vec![ExportGcode, SaveLayerDefaults]),
             ("Extras", vec![VariableText, Camera, Rotary]),
         ],
@@ -366,15 +369,70 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
             }
         });
     });
-    // groups
-    let labels = app.settings.ribbon_labels;
-    let compact = app.settings.ribbon_compact;
+    // groups: as the window narrows, the ribbon steps down (the chosen layout → small buttons with labels →
+    // icons only), and then folds the last groups into a "More »" menu, so nothing goes off-screen
     let size = if narrow { 24.0 } else { 28.0 };
     let mut pin_toggles = Vec::new();
+    let avail = ui.available_width();
+    let user = (app.settings.ribbon_labels, app.settings.ribbon_compact);
+    let mut levels = vec![user];
+    for l in [(true, true), (false, false)] {
+        if !levels.contains(&l) {
+            levels.push(l);
+        }
+    }
+    let tab = app.ribbon_tab;
+    let gs = groups(tab);
+    let scale = (app.settings.ui_scale * 100.0) as i32;
+    let key = move |level: usize| egui::Id::unique(("ribbon_widths", tab as usize, level, scale, narrow));
+    let widths = |ui: &Ui, level: usize| ui.ctx().data(|d| d.get_temp::<Vec<f32>>(key(level)));
+    // the first level that fits (one not measured yet is tried, and measured)
+    let mut level = levels.len() - 1;
+    for k in 0..levels.len() {
+        match widths(ui, k) {
+            Some(w) if w.iter().sum::<f32>() > avail => continue,
+            _ => {
+                level = k;
+                break;
+            }
+        }
+    }
+    let (labels, compact) = levels[level];
+    // at the last level: how many groups fit before "More »"
+    let more_w = 70.0;
+    let mut shown = gs.len();
+    if level == levels.len() - 1 {
+        if let Some(w) = widths(ui, level) {
+            if w.iter().sum::<f32>() > avail {
+                let mut sum = 0.0;
+                shown = 0;
+                for gw in &w {
+                    if sum + gw + more_w > avail {
+                        break;
+                    }
+                    sum += gw;
+                    shown += 1;
+                }
+            }
+        }
+    }
+    let mut measured: Vec<f32> = Vec::new();
+    let handle = |o: ButtonOut, a: Action, run: &mut Vec<Action>, app: &mut App, pins: &mut Vec<Action>| {
+        if o.clicked {
+            run.push(a);
+        }
+        if o.hovered {
+            app.hover_action = Some(a);
+        }
+        if o.toggle_pin {
+            pins.push(a);
+        }
+    };
     egui::ScrollArea::horizontal().id_salt("ribbon_scroll").show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            for (gi, (name, acts)) in groups(app.ribbon_tab).into_iter().enumerate() {
+            for (gi, (name, acts)) in gs.iter().cloned().enumerate().take(shown) {
+                let start = ui.cursor().left();
                 if gi > 0 {
                     ui.add_space(6.0);
                     let (r, _) = ui.allocate_exact_size(vec2(1.0, if labels { size + 52.0 } else { size + 20.0 }), Sense::hover());
@@ -385,17 +443,6 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        let mut handle = |o: ButtonOut, a: Action, run: &mut Vec<Action>, app: &mut App| {
-                            if o.clicked {
-                                run.push(a);
-                            }
-                            if o.hovered {
-                                app.hover_action = Some(a);
-                            }
-                            if o.toggle_pin {
-                                pin_toggles.push(a);
-                            }
-                        };
                         // node operations, alignment and distribution are well known by their icons: small, no text
                         let icons_only = compact && matches!(name, "Points" | "Align" | "Distribute");
                         if icons_only {
@@ -408,7 +455,7 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
                                     ui.horizontal(|ui| {
                                         for a in row {
                                             let o = row_button(ui, app, *a, false);
-                                            handle(o, *a, &mut run, app);
+                                            handle(o, *a, &mut run, app, &mut pin_toggles);
                                         }
                                     });
                                 }
@@ -418,7 +465,7 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
                             let mut it = acts.into_iter();
                             if let Some(first) = it.next() {
                                 let o = big_button(ui, app, first, labels, size);
-                                handle(o, first, &mut run, app);
+                                handle(o, first, &mut run, app, &mut pin_toggles);
                             }
                             let rest: Vec<Action> = it.collect();
                             for pair in rest.chunks(2) {
@@ -427,14 +474,14 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
                                     ui.add_space(3.0);
                                     for a in pair {
                                         let o = row_button(ui, app, *a, true);
-                                        handle(o, *a, &mut run, app);
+                                        handle(o, *a, &mut run, app, &mut pin_toggles);
                                     }
                                 });
                             }
                         } else {
                             for a in acts {
                                 let o = big_button(ui, app, a, labels, size);
-                                handle(o, a, &mut run, app);
+                                handle(o, a, &mut run, app, &mut pin_toggles);
                             }
                         }
                     });
@@ -443,15 +490,50 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
                         ui.painter().text(r.center(), Align2::CENTER_CENTER, name, FontId::proportional(10.5), c.weak);
                     }
                 });
+                measured.push(ui.cursor().left() - start);
             }
-            if app.ribbon_tab == RibbonTab::Image {
+            let folded = shown < gs.len();
+            if folded {
+                // the groups that didn't fit, in a menu
+                ui.add_space(8.0);
+                ui.menu_button(egui::RichText::new("More »").strong(), |ui| {
+                    for (name, acts) in gs.iter().skip(shown) {
+                        ui.label(egui::RichText::new(*name).size(11.0).color(c.weak));
+                        for a in acts {
+                            let o = row_button(ui, app, *a, true);
+                            if o.clicked {
+                                ui.close();
+                            }
+                            handle(o, *a, &mut run, app, &mut pin_toggles);
+                        }
+                        ui.separator();
+                    }
+                    if app.ribbon_tab == RibbonTab::Image {
+                        if let Some(i) = app.selected_bitmap() {
+                            image_quick_adjust(ui, app, i);
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("More commands that don't fit at this window size");
+            } else if app.ribbon_tab == RibbonTab::Image {
                 if let Some(i) = app.selected_bitmap() {
+                    let start = ui.cursor().left();
                     ui.add_space(12.0);
                     image_quick_adjust(ui, app, i);
+                    measured.push(ui.cursor().left() - start);
                 }
             }
         });
     });
+    // remember how wide this layout was, to pick the right one next frame (only when every group was drawn)
+    if shown == gs.len() {
+        let changed = widths(ui, level).map(|w| w != measured).unwrap_or(true);
+        ui.ctx().data_mut(|d| d.insert_temp(key(level), measured));
+        if changed {
+            ui.ctx().request_repaint();
+        }
+    }
     for a in pin_toggles {
         toggle_pin(app, a);
     }
@@ -471,7 +553,9 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
     let r = ui.available_rect_before_wrap();
     ui.painter().line_segment([pos2(r.left(), r.top()), pos2(r.right(), r.top())], Stroke::new(1.0, c.border));
     ui.add_space(3.0);
-    ui.horizontal(|ui| {
+    // wraps onto more rows when the window is narrow, so no control is ever cut off (the most used ones come
+    // first)
+    ui.horizontal_wrapped(|ui| {
         let (ir, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
         icons::paint(ui.painter(), ir, tool.action().icon(), &pal(ui, true, true));
         ui.label(egui::RichText::new(tool.action().label()).strong());
@@ -556,7 +640,18 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
                     ui.selectable_value(&mut o.sel_mode, m, m.label());
                 }
                 ui.separator();
+                // the actions first, so they're always in reach
+                let has_sel = app.image_sel.is_some();
+                if ui.add_enabled(has_sel, egui::Button::new(egui::RichText::new("Selection to Outline").strong())).clicked() {
+                    ui.ctx().data_mut(|d| d.insert_temp(Id::unique("run_action"), Action::SelectionToPath));
+                }
+                if ui.add_enabled(has_sel, egui::Button::new("Clear")).clicked() {
+                    app.image_sel = None;
+                }
+                ui.separator();
+                let o = &mut app.opts;
                 if tool == Tool::Wand {
+                    keep_together(ui, 280.0);
                     ui.label("Tolerance");
                     ui.add(egui::Slider::new(&mut o.wand_tol, 0..=255));
                     ui.checkbox(&mut o.wand_contiguous, "Contiguous");
@@ -568,12 +663,16 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
                 let before = o.wand_refine;
                 ui.spacing_mut().slider_width = 70.0;
                 let r = &mut o.wand_refine;
+                keep_together(ui, 215.0);
                 ui.label("Smooth").on_hover_text("Round off ragged, noisy edges (blur radius in pixels)");
                 ui.add(egui::Slider::new(&mut r.smooth, 0.0..=12.0).step_by(1.0).max_decimals(0));
+                keep_together(ui, 215.0);
                 ui.label("Grow").on_hover_text("Grow (+) or shrink (−) the selection, in pixels");
                 ui.add(egui::Slider::new(&mut r.grow, -20..=20));
+                keep_together(ui, 215.0);
                 ui.label("Specks").on_hover_text("Ignore islands and fill holes smaller than this many pixels across");
                 ui.add(egui::Slider::new(&mut r.speckle, 0.0..=40.0).step_by(1.0).max_decimals(0));
+                keep_together(ui, 215.0);
                 ui.label("Curves").on_hover_text("Smooth the outline into curves (0 = pixel steps)");
                 ui.add(egui::Slider::new(&mut r.curves, 0.0..=4.0).step_by(1.0).max_decimals(0));
                 if ui.small_button("Reset").on_hover_text("Back to the default clean-up").clicked() {
@@ -587,14 +686,6 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
                     if let Some(sel) = app.image_sel.as_mut() {
                         sel.update_outline(&refine);
                     }
-                }
-                ui.separator();
-                let has_sel = app.image_sel.is_some();
-                if ui.add_enabled(has_sel, egui::Button::new("Selection to Outline")).clicked() {
-                    ui.ctx().data_mut(|d| d.insert_temp(Id::unique("run_action"), Action::SelectionToPath));
-                }
-                if ui.add_enabled(has_sel, egui::Button::new("Clear")).clicked() {
-                    app.image_sel = None;
                 }
             }
             Tool::Nodes => {
@@ -644,6 +735,13 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
             _ => {}
         }
     });
+}
+
+/// In the wrapping options bar: start a new row unless `w` points still fit, so a label stays with its slider.
+fn keep_together(ui: &mut Ui, w: f32) {
+    if ui.available_size_before_wrap().x < w {
+        ui.end_row();
+    }
 }
 
 fn mm(u: crate::settings::Units, v: &mut f64, max: f64) -> egui::DragValue<'_> {

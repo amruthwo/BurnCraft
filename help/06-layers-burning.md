@@ -13,7 +13,9 @@ Each palette colour is a layer with its own settings (Layers panel):
 
 ## Preview
 
-**Preview** draws the job as the laser will run it, with cut distance, travel and estimated time. **Play Preview** animates it. Shapes outside the bed are outlined in red and left out of the job.
+**Preview** draws the job as the laser will run it, with cut distance, travel and estimated time. **Play Preview** (a play button on a screen) animates it. Shapes outside the bed are outlined in red and left out of the job.
+
+The Laser tab keeps the controls apart: **Preview** (Preview, Play Preview, Frame) never burns: Frame only moves the head around the outline with the laser off. **Burn** (Start, Pause, Stop) fires the laser. Start is the only orange button with the "fire" icon.
 
 ## Cut order
 
