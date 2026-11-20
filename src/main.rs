@@ -42,6 +42,7 @@ mod ai;
 mod text;
 mod theme;
 mod tour;
+mod svg;
 mod update;
 mod vartext;
 mod xml;
@@ -143,6 +144,14 @@ impl Root {
                 }
                 _ => {}
             }
+            // BURNCRAFT_IMPORT=<file> shows an empty project with that file imported (SVG, pictures…)
+            if let Ok(p) = std::env::var("BURNCRAFT_IMPORT") {
+                if let Ok(bytes) = std::fs::read(&p) {
+                    app.doc.shapes.clear();
+                    app.sel.clear();
+                    app.import_bytes(&p, bytes, 0.0);
+                }
+            }
             if let Some(t) = std::env::var("BURNCRAFT_HELP").ok().and_then(|v| v.parse().ok()) {
                 app.win_help = true;
                 app.help_topic = t;
@@ -177,6 +186,14 @@ impl Root {
             }
             // egui turns Ctrl+C / Ctrl+X / Ctrl+V into clipboard events on most desktops (often without a key
             // event), so treat those as the Copy / Cut / Paste commands when no text field has the keyboard
+            // pasted SVG text that BurnCraft didn't copy (the browser hands it over this way): import it
+            if let Event::Paste(t) = &e {
+                if !typing && !app.win_search && app.capture_for.is_none() && app::is_svg_text(t) && !svg::is_ours(t) {
+                    let now = ctx.input(|i| i.time);
+                    app.paste_svg(t, now);
+                    continue;
+                }
+            }
             let clip = match &e {
                 Event::Copy => Some(actions::Action::Copy),
                 Event::Cut => Some(actions::Action::Cut),

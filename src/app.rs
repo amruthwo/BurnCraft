@@ -1057,6 +1057,10 @@ impl App {
     /// Add a file's contents to this project: another project, an EZCad2 file, or a picture.
     pub fn import_bytes(&mut self, name: &str, bytes: Vec<u8>, now: f64) {
         let ext = std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        if ext == "svg" {
+            self.add_svg(&bytes, None, "Imported", now);
+            return;
+        }
         if ext == "ezd" {
             match crate::ezd::import(&bytes, self.settings.device.width, self.settings.device.height) {
                 Ok(imp) => {
@@ -1203,7 +1207,7 @@ impl App {
                 self.new_doc();
             }
             Action::Open => self.pick_file(Pick::Open, "Laser projects, device profiles, EZCad2", &["lbrn2", "lbrn", "lbdev", "ezd"], now),
-            Action::Import => self.pick_file(Pick::Import, "Images, projects, EZCad2", &["png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "lbrn2", "lbrn", "ezd"], now),
+            Action::Import => self.pick_file(Pick::Import, "SVG, images, projects, EZCad2", &["svg", "png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "lbrn2", "lbrn", "ezd"], now),
             Action::Save => match self.path.clone() {
                 Some(p) if p.extension().map(|e| e == "lbrn2").unwrap_or(false) => self.save_to(p, now),
                 _ => self.run(Action::SaveAs, ctx),
@@ -1268,18 +1272,19 @@ impl App {
             }
             Action::Copy => {
                 self.clipboard = sel.iter().map(|i| self.doc.shapes[*i].clone()).collect();
-                crate::platform::clipboard_set_text(crate::platform::CLIP_MARKER);
+                // as SVG, so other programs can paste it too (BurnCraft knows its own and pastes the exact shapes)
+                crate::platform::clipboard_set_text(&self.clipboard_svg());
                 self.toast(format!("Copied {}", sel.len()), now);
             }
             Action::Cut => {
                 self.clipboard = sel.iter().map(|i| self.doc.shapes[*i].clone()).collect();
-                crate::platform::clipboard_set_text(crate::platform::CLIP_MARKER);
+                crate::platform::clipboard_set_text(&self.clipboard_svg());
                 self.checkpoint();
                 ops::delete(&mut self.doc, &sel);
                 self.sel.clear();
             }
             // our own shapes were copied last (the system clipboard still holds our marker) → paste those
-            Action::Paste if crate::platform::clipboard_text().as_deref() != Some(crate::platform::CLIP_MARKER) => {
+            Action::Paste if !crate::platform::clipboard_text().is_some_and(|t| crate::svg::is_ours(&t)) => {
                 // something newer than our own shapes is on the clipboard: paste, in this order,
                 // SVG, then a picture, then plain text as a Text shape
                 let text = crate::platform::clipboard_text();
@@ -1918,26 +1923,63 @@ impl App {
         self.touch();
     }
 
-    /// Pasted SVG: its outlines as one path (SVG's Y runs down, so it's flipped), centred on the mouse.
+    /// Pasted SVG (from a drawing program, a browser, or BurnCraft itself), centred on the mouse.
     pub fn paste_svg(&mut self, text: &str, now: f64) {
-        let lines: Vec<Vec<P2>> = crate::mcp::outlines_from_svg_text(text).into_iter().map(|l| l.into_iter().map(|p| p2(p.x, -p.y)).collect()).collect();
-        if lines.is_empty() {
-            self.toast("The pasted SVG has no outlines BurnCraft can read.", now);
-            return;
-        }
-        let b = lines.iter().flatten().fold(BBox::EMPTY, |mut b, p| {
-            b.add(*p);
-            b
-        });
         let at = self.canvas.pointer_world.unwrap_or(p2(self.settings.device.width / 2.0, self.settings.device.height / 2.0));
-        let d = at - b.center();
-        let lines: Vec<Vec<P2>> = lines.into_iter().map(|l| l.into_iter().map(|p| p + d).collect()).collect();
+        self.add_svg(text.as_bytes(), Some(at), "Pasted", now);
+    }
+
+    /// Add an SVG's shapes: outlines on the layer nearest their colour (curves kept), embedded pictures as
+    /// images. Centred on `at`, or else where they sit on the SVG's page (the page's top-left at the bed's
+    /// top-left), moved to the middle of the bed if that would leave them off it.
+    pub fn add_svg(&mut self, data: &[u8], at: Option<P2>, what: &str, now: f64) {
+        let bed_h = self.settings.device.height;
+        let imp = match crate::svg::import(data, bed_h) {
+            Ok(i) => i,
+            Err(e) => {
+                self.error(e, now);
+                return;
+            }
+        };
+        let mut shapes: Vec<Shape> = Vec::new();
+        for (pd, rgb) in imp.paths {
+            shapes.push(Shape::new(ShapeKind::Path(pd), Xform::IDENTITY, crate::svg::nearest_layer(rgb)));
+        }
+        let image_layer = self.image_layer();
+        let n_images = imp.images.len();
+        for (bd, w, h, x) in imp.images {
+            shapes.push(Shape::new(ShapeKind::Bitmap { w, h, data: bd, adjust: ImageAdjust::default() }, x, image_layer));
+        }
+        let b = shapes.iter().fold(BBox::EMPTY, |b, s| b.union(&s.bbox()));
+        let bed = BBox { min: p2(0.0, 0.0), max: p2(self.settings.device.width, bed_h) };
+        let target = at.or_else(|| (!bed.contains_box(&b)).then(|| bed.center()));
+        if let Some(t) = target {
+            let d = t - b.center();
+            for s in &mut shapes {
+                s.xform = Xform::translate(d.x, d.y).then_after(s.xform);
+            }
+        }
         self.checkpoint();
-        let layer = self.current_layer_for_vectors();
-        self.doc.shapes.push(Shape::new(ShapeKind::Path(PathData::from_polylines(&lines)), Xform::IDENTITY, layer));
+        let start = self.doc.shapes.len();
+        let n = shapes.len();
+        self.doc.shapes.extend(shapes);
+        if n_images > 0 {
+            self.doc.cut_mut(image_layer).mode = CutMode::Image;
+        }
         self.doc.sync_cuts();
-        self.sel = vec![self.doc.shapes.len() - 1];
+        self.sel = (start..self.doc.shapes.len()).collect();
         self.touch();
+        let mut msg = format!("{what} SVG: {n} shape(s), on the layers nearest their colours");
+        if imp.skipped_text > 0 {
+            msg.push_str(&format!(". {} text item(s) left out: convert text to paths in your drawing program first", imp.skipped_text));
+        }
+        self.toast(msg, now);
+    }
+
+    /// BurnCraft's clipboard as an SVG document (framed tightly around the shapes).
+    fn clipboard_svg(&self) -> String {
+        let frame = self.clipboard.iter().fold(BBox::EMPTY, |b, s| b.union(&s.bbox()));
+        crate::svg::export(&self.clipboard, frame)
     }
 
     /// Pasted plain text becomes a Text shape at the mouse (LightBurn's "Paste Text").

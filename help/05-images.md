@@ -2,8 +2,10 @@
 
 ## Bringing images in
 
-- **Import** (Ctrl+I) adds PNG, JPG, BMP, GIF, WebP or TIFF pictures, or another project.
-- **Paste**: a picture copied in a browser or another app pastes straight in (Ctrl+V), centred on the mouse. Pasted SVG becomes outlines and pasted text becomes a Text shape.
+- **Import** (Ctrl+I) adds SVG drawings, PNG, JPG, BMP, GIF, WebP or TIFF pictures, or another project. You can also drop files on the window.
+- **SVG**: sizes and units are kept (an SVG made 50 mm wide comes in 50 mm wide), and so are curves, rotations and pictures inside it. Each colour goes on the layer with the nearest colour. The SVG's page sits at the bed's top-left corner; if the drawing would land off the bed, it's put in the middle. Text in an SVG is left out (BurnCraft says so): convert text to paths in your drawing program (Inkscape: Path → Object to Path) before saving. Pictures must be embedded in the SVG: pictures that are only linked to as separate files are skipped, so that an SVG from elsewhere can never pull files from your computer into a design (in Inkscape, Extensions → Images → Embed Images).
+- **Paste**: a picture copied in a browser or another app pastes straight in (Ctrl+V), centred on the mouse. Pasted SVG becomes shapes the same way, and pasted text becomes a Text shape.
+- **Copy** puts the selected shapes on the clipboard as SVG too, in their layer colours and real size, so programs that accept pasted SVG text can use them.
 - Images go on an Image layer. Adjust brightness, contrast and gamma in the Image tab, and invert.
 
 ## Tracing

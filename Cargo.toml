@@ -30,6 +30,7 @@ visioncortex = "0.8"
 qrcode = { version = "0.14", default-features = false }
 barcoders = "2"
 datamatrix = "0.3"
+usvg = { version = "0.50.0", default-features = false }
 
 # Desktop only: windows on Wayland/X11, native dialogs, USB/serial lasers, HTTPS to AI services.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -35,6 +35,9 @@ with **Preview** and **Frame** at low power before burning it for real.
 ## Features
 
 * Opens and saves LightBurn projects (`.lbrn2`, and reads older `.lbrn`).
+* SVG: import or drop `.svg` files, or paste SVG from a drawing program or browser, keeping sizes, curves,
+  transforms and embedded pictures, with each colour on its matching layer. Copy puts the selection on the
+  clipboard as SVG for other programs.
 * Tabbed ribbon (Home, Sketch, Modify, Arrange, Image, Laser, View) with large labelled icons, a quick-access
   bar you can drag any tool onto (12 slots + overflow), and a tool options bar.
 * CAD-style navigation: scroll to zoom at the cursor, middle- or right-drag to pan, window selection
@@ -127,6 +130,7 @@ later version. See [LICENSE](LICENSE).
 - Galvo (JCZ / LMC board) support and the EZCad2 file layout follow the open-source
   [MeerK40t](https://github.com/meerk40t/meerk40t) project (MIT licence).
 - Their licence notices are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+- SVG files are read with [usvg](https://github.com/linebender/resvg) (MIT / Apache-2.0).
 
 ## Not affiliated
 
