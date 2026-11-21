@@ -76,3 +76,11 @@ Settings → **About BurnCraft** shows the version, how this copy was installed 
 - BurnCraft saves LightBurn-compatible **.lbrn2** projects, and opens .lbrn2 and older .lbrn files.
 - Sketch relations, editable offsets and arrays are stored as extra attributes that LightBurn ignores.
 - Settings and your layer defaults are kept in your user settings folder (%APPDATA%\BurnCraft on Windows).
+
+## Autosave and recovering unsaved work
+
+- While a project has unsaved changes, BurnCraft keeps a copy of it a few seconds after you stop editing, and at least every 2 minutes while you keep going (Settings → Autosave changes the time, or turns it off).
+- The copies go in BurnCraft's own data folder (in the browser, the browser's storage), never next to your files. Your own files are only written when you Save.
+- Saving a project, closing its tab or quitting normally removes its copy.
+- If BurnCraft or the computer stops unexpectedly, the next start shows **Recover unsaved work**: **Recover** opens a project as a new, unsaved tab (save it to keep it); **Discard** throws the copy away. Closing that window keeps the copies for next time.
+- Two BurnCraft windows open at once don't take each other's copies.

@@ -74,6 +74,8 @@ with **Preview** and **Frame** at low power before burning it for real.
 * Update checker: Settings → About shows the version and can download the matching new release (same package
   type and processor), checked against GitHub's checksum. At start BurnCraft asks GitHub for its latest release;
   this can be switched off, and nothing about you is sent.
+* Autosave: copies of unsaved projects in the app's own data folder, offered back after a crash (Recover /
+  Discard). Your own files are only written when you save.
 * Built-in help and a replayable Welcome Tour.
 
 ## Download

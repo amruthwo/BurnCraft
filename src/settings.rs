@@ -144,6 +144,10 @@ pub struct Settings {
     pub anchor: [u8; 2],
     /// Show the welcome window when the project is empty.
     pub show_welcome: bool,
+    /// Keep copies of unsaved projects in the app's data folder, to recover after a crash.
+    pub autosave: bool,
+    /// The longest time between autosaves while editing goes on (minutes).
+    pub autosave_minutes: f64,
     /// Use the system's window title bar instead of BurnCraft's own (window buttons on the tab row).
     pub system_title_bar: bool,
     /// The Welcome Tour has been seen (finished or skipped), so it doesn't start by itself again.
@@ -236,6 +240,8 @@ impl Default for Settings {
             ribbon_compact: true,
             anchor: [0, 0],
             show_welcome: true,
+            autosave: true,
+            autosave_minutes: 2.0,
             system_title_bar: false,
             tour_done: false,
             camera: Default::default(),
@@ -312,6 +318,8 @@ impl Settings {
             "ribbon_compact": self.ribbon_compact,
             "anchor": self.anchor,
             "show_welcome": self.show_welcome,
+            "autosave": self.autosave,
+            "autosave_minutes": self.autosave_minutes,
             "system_title_bar": self.system_title_bar,
             "tour_done": self.tour_done,
             "camera": serde_json::to_value(&self.camera).unwrap_or(Value::Null),
@@ -393,6 +401,8 @@ impl Settings {
             s.anchor = [a[0].min(2), a[1].min(2)];
         }
         s.show_welcome = b(v, "show_welcome").unwrap_or(s.show_welcome);
+        s.autosave = b(v, "autosave").unwrap_or(s.autosave);
+        s.autosave_minutes = f(v, "autosave_minutes").unwrap_or(s.autosave_minutes).clamp(0.5, 60.0);
         s.system_title_bar = b(v, "system_title_bar").unwrap_or(s.system_title_bar);
         s.tour_done = b(v, "tour_done").unwrap_or(s.tour_done);
         if let Some(c) = v.get("camera").and_then(|c| serde_json::from_value(c.clone()).ok()) {

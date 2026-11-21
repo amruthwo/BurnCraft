@@ -5,6 +5,7 @@
 
 mod actions;
 mod app;
+mod autosave;
 mod barcode;
 mod camera;
 mod canvas;
@@ -128,6 +129,14 @@ impl Root {
                     app.settings.device.rotary.enabled = true;
                 }
                 "settings" => app.win_settings = true,
+                "recover" => {
+                    // sample entries only (nothing is read from or written to the data folder)
+                    let t = autosave::wall_secs();
+                    for (name, path, ago) in [("Coaster set", Some("/home/me/coasters.lbrn2"), 240.0), ("Untitled 2", None, 600.0)] {
+                        app.autosave.found.push(autosave::Found { session: "sample".into(), tab: name.into(), name: name.into(), path: path.map(String::from), time: t - ago });
+                    }
+                    app.win_recover = true;
+                }
                 "nest" => {
                     // nest the demo's shapes on the work area and show the preview
                     app.win_nest = true;
@@ -159,6 +168,12 @@ impl Root {
         } else if !app.settings.tour_done {
             // the first time BurnCraft runs, show the Welcome Tour
             app.tour = Some(0);
+        }
+        if app.screenshot.is_none() {
+            // autosave into the app's data folder; offer back projects from a session that didn't close normally
+            app.autosave = autosave::Autosave::new(autosave::Store::app());
+            app.autosave.scan();
+            app.win_recover = !app.autosave.found.is_empty();
         }
         Root { app, started: false, last_title: String::new(), open_on_start: open }
     }
@@ -334,6 +349,13 @@ impl eframe::App for Root {
                     }
                 }
             }
+        }
+    }
+
+    /// A normal close: autosave's copies aren't needed any more (unsaved work was confirmed when quitting).
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.app.screenshot.is_none() {
+            self.app.autosave.end();
         }
     }
 
@@ -515,6 +537,14 @@ impl eframe::App for Root {
         } else if app.net_job.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
+        // autosave: copies of unsaved projects, a few seconds after editing stops
+        {
+            let now = ctx.input(|i| i.time);
+            app.autosave_tick(now);
+            if app.dirty && app.settings.autosave {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(autosave::QUIET_SECS + 0.5));
+            }
+        }
         // a nest finished? (in the browser, work on it for a moment each frame)
         if let Some(j) = &app.nest_job {
             j.tick();
@@ -567,7 +597,7 @@ impl eframe::App for Root {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
         // ask before closing with unsaved work
-        if ctx.input(|i| i.viewport().close_requested()) && app.dirty && app.screenshot.is_none() && !app.pending_quit {
+        if ctx.input(|i| i.viewport().close_requested()) && app.any_dirty() && app.screenshot.is_none() && !app.pending_quit {
             let ok = matches!(
                 crate::platform::MessageDialog::new().set_title("Quit BurnCraft?").set_description("You have unsaved changes. Quit anyway?").set_buttons(crate::platform::MessageButtons::YesNo).show(),
                 crate::platform::MessageDialogResult::Yes

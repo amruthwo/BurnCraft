@@ -26,7 +26,74 @@ pub fn all(ctx: &Context, app: &mut App, run: &mut Vec<Action>) {
     camera(ctx, app);
     rotary(ctx, app);
     nest(ctx, app);
+    recover(ctx, app);
     toasts(ctx, app);
+}
+
+/// Projects autosave kept from a session that didn't close normally: Recover or Discard each.
+fn recover(ctx: &Context, app: &mut App) {
+    if !app.win_recover {
+        return;
+    }
+    if app.autosave.found.is_empty() {
+        app.win_recover = false;
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let mut open = true;
+    let mut act: Option<(usize, bool)> = None; // (which, recover?)
+    let mut all: Option<bool> = None;
+    egui::Window::new("Recover unsaved work").open(&mut open).collapsible(false).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(480.0).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
+        ui.label("BurnCraft didn't close normally last time. These projects had unsaved changes:");
+        ui.add_space(6.0);
+        egui::Grid::new("recover").num_columns(3).spacing(vec2(12.0, 8.0)).striped(true).show(ui, |ui| {
+            for (k, f) in app.autosave.found.iter().enumerate() {
+                ui.vertical(|ui| {
+                    ui.set_min_width(280.0);
+                    ui.label(RichText::new(&f.name).strong());
+                    let from = f.path.as_deref().unwrap_or("never saved");
+                    ui.label(RichText::new(format!("{} · {from}", crate::autosave::ago(f.time))).size(11.0).weak());
+                });
+                if ui.button("Recover").on_hover_text("Open it in a new tab; save it to keep it").clicked() {
+                    act = Some((k, true));
+                }
+                if ui.button("Discard").on_hover_text("Throw this copy away").clicked() {
+                    act = Some((k, false));
+                }
+                ui.end_row();
+            }
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button("Recover all").clicked() {
+                all = Some(true);
+            }
+            if ui.button("Discard all").clicked() {
+                all = Some(false);
+            }
+        });
+        ui.label(RichText::new("Recovered projects open as new, unsaved tabs: your own files haven't been changed.").size(11.0).weak());
+    });
+    let mut todo: Vec<(crate::autosave::Found, bool)> = Vec::new();
+    if let Some((k, rec)) = act {
+        if let Some(f) = app.autosave.found.get(k) {
+            todo.push((f.clone(), rec));
+        }
+    }
+    if let Some(rec) = all {
+        todo.extend(app.autosave.found.iter().cloned().map(|f| (f, rec)));
+    }
+    for (f, rec) in todo {
+        if rec {
+            app.recover_project(&f, now);
+        } else {
+            app.autosave.forget(&f);
+        }
+    }
+    if !open {
+        // closing the window keeps the copies for next time
+        app.win_recover = false;
+    }
 }
 
 fn shortcuts(ctx: &Context, app: &mut App) {
@@ -202,6 +269,12 @@ fn settings(ctx: &Context, app: &mut App) {
             ui.end_row();
             ui.label("Grid spacing");
             save |= ui.add(u.len(&mut app.settings.grid_step, 1.0, 100.0, 0.1)).changed();
+            ui.end_row();
+            ui.label("Autosave");
+            ui.horizontal(|ui| {
+                save |= ui.checkbox(&mut app.settings.autosave, "Keep copies of unsaved work").on_hover_text("If BurnCraft or the computer stops unexpectedly, you're offered your unsaved projects back at the next start. Copies are kept in BurnCraft's own data folder (the browser's storage on the web), never next to your files.").changed();
+                save |= ui.add_enabled(app.settings.autosave, crate::settings::num(&mut app.settings.autosave_minutes).range(0.5..=60.0).speed(0.1).prefix("at least every ").suffix(" min")).on_hover_text("A copy is also made a few seconds after you stop editing").changed();
+            });
             ui.end_row();
         });
         ui.separator();

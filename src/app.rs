@@ -384,6 +384,16 @@ pub struct App {
     pub rename: Option<(u64, String)>,
     /// A second click on a selected row starts renaming after a pause, like a file manager: row and when.
     pub rename_click: Option<(usize, f64)>,
+    /// Autosave and crash recovery (see autosave.rs).
+    pub autosave: crate::autosave::Autosave,
+    /// A lasting id for each project tab (same order as `tabs`), naming its autosave copy.
+    pub tab_ids: Vec<u64>,
+    next_tab_id: u64,
+    /// The document revision autosave last looked at.
+    autosave_rev: u64,
+    /// The Recover window (projects from a session that didn't close normally).
+    pub win_recover: bool,
+    autosave_warned: bool,
 }
 
 /// What a chosen file is for (the browser hands files over later, so the purpose travels with it).
@@ -513,6 +523,12 @@ impl App {
             win_nest: false,
             rename: None,
             rename_click: None,
+            autosave: crate::autosave::Autosave::new(crate::autosave::Store::none()),
+            tab_ids: vec![1],
+            next_tab_id: 2,
+            autosave_rev: 0,
+            win_recover: false,
+            autosave_warned: false,
             nest_job: None,
             nest_result: None,
         }
@@ -535,6 +551,85 @@ impl App {
         self.touch();
     }
     /// Mark the document as changed (for caches and the title).
+    /// Autosave, once a frame: copy projects with unsaved changes after a pause in editing (or every few
+    /// minutes while editing goes on), drop the copies of projects that are saved, and keep the heartbeat.
+    pub fn autosave_tick(&mut self, now: f64) {
+        if !self.settings.autosave || self.screenshot.is_some() || self.tab_ids.len() != self.tabs.len() {
+            return;
+        }
+        let active = self.tab_ids[self.active_tab];
+        if self.rev != self.autosave_rev {
+            self.autosave_rev = self.rev;
+            if self.dirty {
+                self.autosave.changed(active, now);
+            }
+        }
+        let interval = self.settings.autosave_minutes.clamp(0.5, 60.0) * 60.0;
+        for i in 0..self.tabs.len() {
+            let id = self.tab_ids[i];
+            let dirty = if i == self.active_tab { self.dirty } else { self.tabs[i].as_ref().is_some_and(|t| t.dirty) };
+            if !dirty {
+                if self.autosave.stored(id) {
+                    self.autosave.clear(id);
+                }
+                continue;
+            }
+            if !self.autosave.due(id, dirty, now, interval) {
+                continue;
+            }
+            let name = self.tab_title(i).0;
+            let (text, path) = if i == self.active_tab {
+                (crate::lbrn::save_string(&self.doc, &self.kept), self.path.clone())
+            } else {
+                let Some(t) = self.tabs[i].as_ref() else { continue };
+                (crate::lbrn::save_string(&t.doc, &t.kept), t.path.clone())
+            };
+            let path = path.map(|p| p.to_string_lossy().to_string());
+            self.autosave.write(id, &text, &name, path.as_deref(), now);
+        }
+        self.autosave.heartbeat(now);
+        if let Some(e) = self.autosave.failed.take() {
+            if !self.autosave_warned {
+                self.autosave_warned = true;
+                self.error(format!("Autosave couldn't keep a copy of your project ({e}). Save your work as usual."), now);
+            }
+        }
+    }
+
+    /// Does any open project tab have unsaved changes?
+    pub fn any_dirty(&self) -> bool {
+        self.dirty || self.tabs.iter().flatten().any(|t| t.dirty)
+    }
+
+    /// Bring back a project found by autosave (as a new tab, unsaved, so you choose where to save it).
+    pub fn recover_project(&mut self, f: &crate::autosave::Found, now: f64) {
+        let Some(text) = self.autosave.recover(f) else {
+            self.error(format!("\u{201c}{}\u{201d} couldn't be recovered: its copy is damaged.", f.name), now);
+            return;
+        };
+        match crate::lbrn::load_str(&text) {
+            Ok(l) => {
+                if !self.doc.shapes.is_empty() || self.dirty || self.path.is_some() {
+                    self.new_tab(None);
+                }
+                self.new_doc();
+                self.doc = l.doc;
+                self.kept = l.kept;
+                self.doc.sync_cuts();
+                self.doc.title = Some(format!("{} (recovered)", f.name));
+                // never pointed at the original file: Save asks where, so nothing is overwritten by surprise
+                self.path = None;
+                self.dirty = true;
+                self.rev += 1;
+                self.zoom_to_fit_all();
+                self.autosave.forget(f);
+                let from = f.path.as_deref().map(|p| format!(" (it was {p})")).unwrap_or_default();
+                self.toast(format!("Recovered \u{201c}{}\u{201d}{from}. Save it to keep it.", f.name), now);
+            }
+            Err(e) => self.error(format!("\u{201c}{}\u{201d} couldn't be recovered: {e}", f.name), now),
+        }
+    }
+
     pub fn touch(&mut self) {
         self.rev += 1;
         self.content_rev += 1;
@@ -731,6 +826,8 @@ impl App {
         let cur = self.stash();
         self.tabs[self.active_tab] = Some(cur);
         self.tabs.push(None);
+        self.tab_ids.push(self.next_tab_id);
+        self.next_tab_id += 1;
         self.active_tab = self.tabs.len() - 1;
         self.new_doc();
         if let Some(d) = doc {
@@ -746,7 +843,7 @@ impl App {
         }
         // like LightBurn's Remove Page, ask first — here only when there's unsaved work
         let dirty = if i == self.active_tab { self.dirty } else { self.tabs[i].as_ref().map(|t| t.dirty).unwrap_or(false) };
-        if dirty && self.screenshot.is_none() {
+        if dirty && self.screenshot.is_none() && !cfg!(test) {
             let name = self.tab_title(i).0;
             let ok = matches!(
                 crate::platform::MessageDialog::new()
@@ -765,6 +862,11 @@ impl App {
             self.switch_tab(next);
         }
         self.tabs.remove(i);
+        // a closed project's autosave copy goes with it
+        if i < self.tab_ids.len() {
+            let id = self.tab_ids.remove(i);
+            self.autosave.clear(id);
+        }
         if self.active_tab > i {
             self.active_tab -= 1;
         }
