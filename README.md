@@ -7,6 +7,8 @@
 An open-source laser design and control app: a laser workflow with Photoshop-style image tools and Onshape-style
 CAD sketching, that opens LightBurn projects. Runs on Linux, Windows, macOS and in the browser.
 
+**🌐 Website: [getburncraft.github.io](https://getburncraft.github.io/)** · [Download](https://github.com/amruthwo/BurnCraft/releases/latest) · [Try it in your browser](https://amruthwo.github.io/BurnCraft/)
+
 ![BurnCraft's main window: the tabbed ribbon, the shapes list, a design on the laser bed, and layer settings](docs/screenshot.png)
 
 > [!WARNING]
