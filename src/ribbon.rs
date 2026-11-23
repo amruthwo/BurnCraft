@@ -34,6 +34,7 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Combine", vec![Weld, BoolUnion, BoolSubtract, BoolIntersect, JoinPaths]),
             ("Shape", vec![Offset, GridArray, CircularArray, PathPattern, AlignToPath, EditArray, ConvertToPath, BreakApart]),
             ("Group", vec![Group, Ungroup]),
+            ("Cutting", vec![ToolTabs]),
         ],
         RibbonTab::Arrange => vec![
             ("Align", vec![AlignLeft, AlignVCenter, AlignRight, AlignTop, AlignHCenter, AlignBottom]),

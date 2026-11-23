@@ -104,8 +104,32 @@ pub struct CutSetting {
     /// LightBurn's "Constant Power Mode" (file key `forceConstantPower`): this layer burns with M3 (constant power)
     /// even on a laser set to dynamic M4.
     pub force_constant_power: bool,
+    /// Tabs (bridges) on this layer's cuts: short places the laser skips so parts stay in the sheet.
+    pub tabs: Tabs,
     /// Keys BurnCraft doesn't edit, kept so files round-trip.
     pub extra: Vec<(String, String)>,
+}
+
+/// Automatic tabs on a cut layer. Shapes with tabs placed by hand (the Tabs tool) use those instead.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Tabs {
+    /// Put tabs on every closed shape of the layer.
+    pub on: bool,
+    /// A fixed number per shape (`count`), or one every `spacing` mm.
+    pub by_count: bool,
+    pub count: u32,
+    pub spacing: f64,
+    /// Length of each tab along the outline, mm. Also used for tabs placed by hand.
+    pub width: f64,
+    /// Leave holes (shapes inside other shapes) without tabs, so their scrap falls out.
+    pub skip_inner: bool,
+}
+
+impl Default for Tabs {
+    fn default() -> Self {
+        Tabs { on: false, by_count: true, count: 4, spacing: 50.0, width: 0.5, skip_inner: true }
+    }
 }
 
 impl CutSetting {
@@ -137,6 +161,7 @@ impl CutSetting {
             frequency: Self::DEFAULT_FREQUENCY,
             fill_individually: false,
             force_constant_power: false,
+            tabs: Tabs::default(),
             extra: Vec::new(),
         }
     }
@@ -435,6 +460,9 @@ pub struct Shape {
     pub name: String,
     /// Attributes we don't model, kept for round-trip.
     pub extra_attrs: Vec<(String, String)>,
+    /// Tabs placed by hand (the Tabs tool), as points on the outline in the shape's own coordinates. They
+    /// replace the layer's automatic tabs on the outlines they sit on.
+    pub tabs: Vec<P2>,
 }
 
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -445,7 +473,7 @@ pub fn new_id() -> u64 {
 
 impl Shape {
     pub fn new(kind: ShapeKind, xform: Xform, layer: usize) -> Shape {
-        Shape { id: new_id(), kind, xform, layer, locked: false, name: String::new(), extra_attrs: Vec::new() }
+        Shape { id: new_id(), kind, xform, layer, locked: false, name: String::new(), extra_attrs: Vec::new(), tabs: Vec::new() }
     }
 
     pub fn type_name(&self) -> &'static str {

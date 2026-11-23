@@ -160,6 +160,8 @@ pub struct Settings {
     pub check_updates: bool,
     /// Nest options (spacing, margin, rotations…).
     pub nest: crate::nest::NestSettings,
+    /// Start from (absolute / user origin / current position), the job's anchor point and the user origin.
+    pub job_start: crate::gcode::JobStart,
     pub selection_cad_style: bool,
     /// Layer settings applied to layers of new projects.
     pub layer_defaults: Vec<crate::model::CutSetting>,
@@ -250,6 +252,7 @@ impl Default for Settings {
             camera: Default::default(),
             check_updates: true,
             nest: Default::default(),
+            job_start: Default::default(),
             selection_cad_style: true,
             layer_defaults: Vec::new(),
             pinned: ["Save", "Undo", "Redo", "ToolSelect", "ToolLine", "ToolRect", "ToolEllipse", "ToolText", "TraceImage", "Preview", "LaserStart"].iter().map(|s| s.to_string()).collect(),
@@ -329,6 +332,7 @@ impl Settings {
             "camera": serde_json::to_value(&self.camera).unwrap_or(Value::Null),
             "check_updates": self.check_updates,
             "nest": serde_json::to_value(&self.nest).unwrap_or(Value::Null),
+            "job_start": serde_json::to_value(self.job_start).unwrap_or(Value::Null),
             "selection_cad_style": self.selection_cad_style,
             "layer_defaults": self.layer_defaults_xml(),
             "pinned": self.pinned,
@@ -416,6 +420,10 @@ impl Settings {
         s.check_updates = b(v, "check_updates").unwrap_or(s.check_updates);
         if let Some(n) = v.get("nest").and_then(|n| serde_json::from_value(n.clone()).ok()) {
             s.nest = n;
+        }
+        if let Some(j) = v.get("job_start").and_then(|j| serde_json::from_value::<crate::gcode::JobStart>(j.clone()).ok()) {
+            let ok = |v: f64| if v.is_finite() { v } else { 0.0 };
+            s.job_start = crate::gcode::JobStart { anchor: [j.anchor[0].min(2), j.anchor[1].min(2)], user_origin: (ok(j.user_origin.0), ok(j.user_origin.1)), ..j };
         }
         s.selection_cad_style = b(v, "selection_cad_style").unwrap_or(true);
         if let Some(x) = v.get("layer_defaults").and_then(|x| x.as_str()) {

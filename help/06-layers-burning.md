@@ -8,8 +8,15 @@ Each palette colour is a layer with its own settings (Layers panel):
 - **Speed** (mm/s), **Max / Min power** (%), **Passes**, **Line interval** for fills, scan angle, cross-hatch, bi-directional.
 - **Fill shapes individually** finishes each shape before moving on — much faster when shapes are far apart.
 - **Constant Power Mode** burns the layer at constant power (M3) instead of dynamic power (M4).
+- **Overscan** (fills and images): the head runs on past each end of a scan line with the laser off, so it's at full speed while it burns and edges come out even. It's a percentage of the speed: 2.5% at 100 mm/s is 2.5 mm. It never runs off the bed.
+- **Kerf offset** (cut layers): the laser cuts away a thin line of material, so parts come out slightly small and holes slightly big. The kerf offset moves cuts outward on outer edges and inward on holes. Measure the width of a test cut and use half of it. A negative value does the opposite (for inlays).
+- **Tabs** (cut layers): short places the laser skips so parts stay in the sheet until you snap them out. Choose a number of tabs per shape or one every so many mm, and the tab width. **Skip holes** leaves shapes inside other shapes without tabs, so their scrap falls out.
 - **Burn** and **Show** switch a layer's output and visibility. T1 and T2 are tool layers and never burn (T2 holds construction lines).
 - **Save Layer Defaults** keeps your settings for new projects.
+
+## Tabs by hand
+
+**Tabs** (Modify tab, Cutting) puts tabs exactly where you want them: click on a cut outline to add one, click a tab (the small orange marks) to remove it. Tabs placed by hand replace the layer's automatic ones on that outline, and they're used even when the layer's Tabs box is off. The layer's **Tab width** sets their length. Preview shows the gaps.
 
 ## Preview
 
@@ -24,5 +31,11 @@ Layers burn in the order of the Layers list, top first: drag a layer by its dott
 ## Running a job
 
 - **G-code lasers**: choose the port and speed in the Laser panel and press **Connect**. **Frame** traces the job outline, **Start** burns, **Pause** and **Stop** control it. The Laser panel shows elapsed and remaining time.
-- **Save G-code** writes the job as a file named Project_-_Device_-_Time.gcode.
+- **Start from** (Laser panel, G-code lasers) sets where the job goes:
+  - **Absolute coordinates**: where it sits on the bed in BurnCraft (the default).
+  - **User origin**: the job's anchor point goes to a point you save. Type it, or press **Here** to use the head's position (connect and home first).
+  - **Current position**: the job's anchor point goes where the head is now. Frame brings the head back to that point afterwards, so Start still begins there.
+  - **Job anchor** (the nine dots) picks which point of the job that is: a corner, an edge's middle or the centre.
+  - BurnCraft still checks that the job stays on the bed. A laser that hasn't been homed doesn't know where its head is on the bed, so with Current position BurnCraft can only check that the job is no bigger than the bed: Frame it first.
+- **Save G-code** writes the job as a file named Project_-_Device_-_Time.gcode. With Current position, the file starts from wherever the head is when it runs.
 - **Ruida** controllers: enter the controller's IP address; Start sends the job over the network, and Save G-code writes an .rd file for a USB stick.

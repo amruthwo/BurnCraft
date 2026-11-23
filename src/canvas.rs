@@ -603,7 +603,7 @@ pub fn canvas_ui(app: &mut App, ui: &mut Ui) -> Vec<Action> {
     let raw_world = hover.map(|h| tf.w(h));
     app.canvas.hover_world = raw_world;
     let moving_sel = matches!(app.canvas.drag, Some(Drag::Move { .. }));
-    let snaps = !matches!(app.tool, Tool::Select | Tool::Wand | Tool::Lasso | Tool::Trim) || moving_sel;
+    let snaps = !matches!(app.tool, Tool::Select | Tool::Wand | Tool::Lasso | Tool::Trim | Tool::Tabs) || moving_sel;
     // the point the new segment starts from, for horizontal / vertical / parallel inference
     let anchor = match (&app.canvas.drag, app.tool) {
         (Some(Drag::Create { start, .. }), _) | (Some(Drag::Measure { start, .. }), _) => Some(*start),
@@ -1208,6 +1208,14 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
         }
     }
 
+    // tabs placed by hand: small marks across the outline
+    for s in app.doc.shapes.iter().filter(|s| !s.tabs.is_empty()) {
+        for t in &s.tabs {
+            let c = tf.s(s.xform.apply(*t));
+            painter.rect_filled(Rect::from_center_size(c, vec2(6.0, 6.0)), 1.0, Color32::from_rgb(240, 150, 40));
+        }
+    }
+
     // tool hover feedback
     if let Some(w) = raw_world {
         match app.tool {
@@ -1216,6 +1224,19 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
                     painter.add(EShape::line(removed.iter().map(|p| tf.s(*p)).collect(), Stroke::new(4.0, Color32::from_rgb(235, 70, 60))));
                 }
             }
+            Tool::Tabs => match tab_target(app, w, zoom) {
+                Some((si, TabHit::Existing(k))) => {
+                    let c = tf.s(app.doc.shapes[si].xform.apply(app.doc.shapes[si].tabs[k]));
+                    painter.circle_stroke(c, 8.0, Stroke::new(2.0, Color32::from_rgb(235, 70, 60)));
+                    painter.text(c + vec2(10.0, -10.0), Align2::LEFT_BOTTOM, "remove tab", FontId::proportional(11.0), Color32::from_rgb(235, 70, 60));
+                }
+                Some((si, TabHit::New(local))) => {
+                    let c = tf.s(app.doc.shapes[si].xform.apply(local));
+                    painter.circle_stroke(c, 7.0, Stroke::new(2.0, ACCENT));
+                    painter.text(c + vec2(10.0, -10.0), Align2::LEFT_BOTTOM, "add tab", FontId::proportional(11.0), ACCENT);
+                }
+                None => {}
+            },
             Tool::Fillet => {
                 let target = app.hit_test(w, zoom).or(app.sel.first().copied());
                 if let Some(si) = target {
@@ -1360,7 +1381,7 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
     if hover.is_some() {
         match app.tool {
             Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Line | Tool::Text | Tool::Measure | Tool::Pen | Tool::Arc | Tool::Star | Tool::Lasso | Tool::Wand => ctx.set_cursor_icon(egui::CursorIcon::Crosshair),
-            Tool::Trim | Tool::Fillet => ctx.set_cursor_icon(egui::CursorIcon::PointingHand),
+            Tool::Trim | Tool::Fillet | Tool::Tabs => ctx.set_cursor_icon(egui::CursorIcon::PointingHand),
             _ => {}
         }
     }
@@ -2158,6 +2179,22 @@ fn click(app: &mut App, w: P2, snapped: P2, mods: egui::Modifiers, zoom: f64, no
             }
             return;
         }
+        Tool::Tabs => {
+            match tab_target(app, w, zoom) {
+                Some((si, TabHit::Existing(k))) => {
+                    app.checkpoint();
+                    app.doc.shapes[si].tabs.remove(k);
+                    app.touch();
+                }
+                Some((si, TabHit::New(local))) => {
+                    app.checkpoint();
+                    app.doc.shapes[si].tabs.push(local);
+                    app.touch();
+                }
+                None => {}
+            }
+            return;
+        }
         Tool::MirrorLine => {
             if app.sel.is_empty() {
                 app.error("Select the shapes to mirror first, then pick the mirror line.", now);
@@ -2359,6 +2396,49 @@ fn click(app: &mut App, w: P2, snapped: P2, mods: egui::Modifiers, zoom: f64, no
         }
         _ => {}
     }
+}
+
+/// What a click with the Tabs tool would do: remove a tab that's there, or add one on the nearest outline.
+enum TabHit {
+    Existing(usize),
+    /// A new tab, in the shape's own coordinates.
+    New(P2),
+}
+
+fn tab_target(app: &App, w: P2, zoom: f64) -> Option<(usize, TabHit)> {
+    let reach = 8.0 / zoom;
+    // a tab under the pointer first
+    for (si, s) in app.doc.shapes.iter().enumerate() {
+        if let Some(k) = s.tabs.iter().position(|t| s.xform.apply(*t).dist(w) <= reach) {
+            return Some((si, TabHit::Existing(k)));
+        }
+    }
+    let mut best: Option<(usize, P2, f64)> = None;
+    for (si, s) in app.doc.shapes.iter().enumerate() {
+        if s.locked || s.is_bitmap() || !app.doc.cut(s.layer).map(|c| c.output).unwrap_or(true) {
+            continue;
+        }
+        let b = s.bbox();
+        if w.x < b.min.x - reach || w.x > b.max.x + reach || w.y < b.min.y - reach || w.y > b.max.y + reach {
+            continue;
+        }
+        for l in s.world_outline(0.02).iter().filter(|l| is_closed(l)) {
+            for seg in l.windows(2) {
+                let (a, bb) = (seg[0], seg[1]);
+                let ab = bb - a;
+                let len2 = ab.x * ab.x + ab.y * ab.y;
+                let t = if len2 > 0.0 { (((w - a).x * ab.x + (w - a).y * ab.y) / len2).clamp(0.0, 1.0) } else { 0.0 };
+                let q = a + ab * t;
+                let d = q.dist(w);
+                if d <= reach && best.map_or(true, |(_, _, bd)| d < bd) {
+                    best = Some((si, q, d));
+                }
+            }
+        }
+    }
+    let (si, q, _) = best?;
+    let local = app.doc.shapes[si].xform.inverse()?.apply(q);
+    Some((si, TabHit::New(local)))
 }
 
 /// The straight line under the cursor for mirroring: a path's straight segment (including construction
@@ -2638,7 +2718,7 @@ fn welcome(ui: &mut Ui, app: &App, rect: Rect, run: &mut Vec<Action>) {
 fn draw_guides(app: &App, painter: &egui::Painter, tf: &Tf, active: bool) {
     use crate::snap::PointKind;
     let green = Color32::from_rgb(60, 200, 110);
-    let sketching = !matches!(app.tool, Tool::Select | Tool::Pan | Tool::Wand | Tool::Lasso | Tool::Trim | Tool::Nodes | Tool::Relate | Tool::Dimension | Tool::MirrorLine) || matches!(app.canvas.drag, Some(Drag::Move { .. }) | Some(Drag::NodeMove { .. }));
+    let sketching = !matches!(app.tool, Tool::Select | Tool::Pan | Tool::Wand | Tool::Lasso | Tool::Trim | Tool::Tabs | Tool::Nodes | Tool::Relate | Tool::Dimension | Tool::MirrorLine) || matches!(app.canvas.drag, Some(Drag::Move { .. }) | Some(Drag::NodeMove { .. }));
     if !sketching {
         return;
     }

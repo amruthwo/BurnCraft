@@ -250,7 +250,13 @@ fn ring_to_ls(r: &[P2]) -> LineString<f64> {
 /// Closed outlines → polygons with holes (even-odd nesting).
 pub fn to_multipolygon(rings: &[Vec<P2>]) -> MultiPolygon<f64> {
     let rings: Vec<&Vec<P2>> = rings.iter().filter(|r| is_closed(r) && r.len() > 3).collect();
-    let depth: Vec<usize> = rings.iter().enumerate().map(|(i, r)| rings.iter().enumerate().filter(|(j, o)| *j != i && point_in_rings(r[0], std::slice::from_ref(*o))).count()).collect();
+    // (a quick box test first: a point can only be inside a ring that's inside the ring's box)
+    let boxes: Vec<BBox> = rings.iter().map(|r| BBox::from_points(&r[..])).collect();
+    let inside = |p: P2, j: usize| {
+        let b = boxes[j];
+        p.x >= b.min.x && p.x <= b.max.x && p.y >= b.min.y && p.y <= b.max.y && point_in_rings(p, std::slice::from_ref(rings[j]))
+    };
+    let depth: Vec<usize> = rings.iter().enumerate().map(|(i, r)| (0..rings.len()).filter(|&j| j != i && inside(r[0], j)).count()).collect();
     let mut polys = Vec::new();
     for (i, r) in rings.iter().enumerate() {
         if depth[i] % 2 != 0 {
@@ -259,7 +265,7 @@ pub fn to_multipolygon(rings: &[Vec<P2>]) -> MultiPolygon<f64> {
         let holes: Vec<LineString<f64>> = rings
             .iter()
             .enumerate()
-            .filter(|(j, h)| depth[*j] == depth[i] + 1 && point_in_rings(h[0], std::slice::from_ref(*r)))
+            .filter(|(j, h)| depth[*j] == depth[i] + 1 && inside(h[0], i))
             .map(|(_, h)| ring_to_ls(h))
             .collect();
         polys.push(Polygon::new(ring_to_ls(r), holes));
@@ -379,6 +385,31 @@ pub fn grow(rings: &[Vec<P2>], d: f64) -> Vec<Vec<P2>> {
         return rings.to_vec();
     }
     from_multipolygon(&buffer(&mp, d, OffsetJoin::Corner))
+}
+
+/// Kerf offset for cutting: closed outlines (holes found by nesting) grow by `d` with round corners, the path
+/// a round beam's centre follows. A negative `d` shrinks them.
+///
+/// Each part (an outline with the holes wholly inside it) is offset on its own, so parts that overlap or
+/// touch are still cut in full rather than merged.
+pub fn kerf_offset(rings: &[Vec<P2>], d: f64) -> Vec<Vec<P2>> {
+    let rings: Vec<Vec<P2>> = rings.iter().filter(|r| is_closed(r) && r.len() > 3).cloned().collect();
+    if rings.len() >= 4000 {
+        // too many to compare one by one: the even-odd grouping used for fills
+        return from_multipolygon(&buffer(&to_multipolygon(&rings), d, OffsetJoin::Round));
+    }
+    let depth = crate::toolpath::nesting_depth(&rings);
+    let boxes: Vec<BBox> = rings.iter().map(|r| BBox::from_points(r)).collect();
+    let mut out = Vec::new();
+    for (i, r) in rings.iter().enumerate().filter(|(i, _)| depth[*i] % 2 == 0) {
+        let holes: Vec<LineString<f64>> = (0..rings.len())
+            .filter(|&j| depth[j] == depth[i] + 1 && boxes[i].contains_box(&boxes[j]) && point_in_rings(rings[j][0], std::slice::from_ref(r)))
+            .map(|j| ring_to_ls(&rings[j]))
+            .collect();
+        let part = MultiPolygon(vec![Polygon::new(ring_to_ls(r), holes)]);
+        out.extend(from_multipolygon(&buffer(&part, d, OffsetJoin::Round)));
+    }
+    out
 }
 
 /// Corner joins stay pointed until the point would reach this many times the offset distance.

@@ -229,6 +229,9 @@ fn shape_json(s: &Shape, images: &mut Images) -> Value {
     if !s.name.is_empty() {
         o.insert("name".into(), json!(s.name));
     }
+    if !s.tabs.is_empty() {
+        o.insert("tabs".into(), json!(s.tabs.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>()));
+    }
     let (lbrn, kept) = split_extra(&s.extra_attrs);
     if !lbrn.is_empty() {
         o.insert("lbrn_attributes".into(), Value::Object(lbrn));
@@ -246,6 +249,7 @@ fn cut_json(c: &CutSetting) -> Value {
         "bidirectional": c.bidir, "overscan_percent": c.overscan_percent, "priority": c.priority, "output": c.output,
         "hide": c.hide, "air_assist": c.air_assist, "z_offset": c.z_offset, "kerf": c.kerf, "frequency": c.frequency,
         "fill_individually": c.fill_individually, "constant_power": c.force_constant_power,
+        "tabs": serde_json::to_value(c.tabs).unwrap_or(Value::Null),
     });
     let (lbrn, kept) = split_extra(&c.extra);
     if let Value::Object(m) = &mut o {
@@ -392,7 +396,7 @@ fn cut_from(c: &Map<String, Value>) -> CutSetting {
     let index = c.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     let d = CutSetting::new(index);
     let mode = c.get("mode").and_then(|v| v.as_str()).and_then(|m| CutMode::ALL.into_iter().find(|x| format!("{x:?}") == m)).unwrap_or(d.mode);
-    const KNOWN: &[&str] = &["index", "name", "mode", "speed", "min_power", "max_power", "passes", "interval", "angle", "cross_hatch", "bidirectional", "overscan_percent", "priority", "output", "hide", "air_assist", "z_offset", "kerf", "frequency", "fill_individually", "constant_power", "lbrn_attributes"];
+    const KNOWN: &[&str] = &["index", "name", "mode", "speed", "min_power", "max_power", "passes", "interval", "angle", "cross_hatch", "bidirectional", "overscan_percent", "priority", "output", "hide", "air_assist", "z_offset", "kerf", "frequency", "fill_individually", "constant_power", "tabs", "lbrn_attributes"];
     let mut extra: Vec<(String, String)> = match c.get("lbrn_attributes") {
         Some(Value::Object(m)) => m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string())).collect(),
         _ => Vec::new(),
@@ -420,6 +424,7 @@ fn cut_from(c: &Map<String, Value>) -> CutSetting {
         frequency: f(c, "frequency", d.frequency),
         fill_individually: b(c, "fill_individually", d.fill_individually),
         force_constant_power: b(c, "constant_power", d.force_constant_power),
+        tabs: c.get("tabs").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default(),
         extra,
     }
 }
@@ -496,11 +501,12 @@ impl ReadCtx<'_> {
         let mut sh = Shape::new(kind, xform, o.get("layer").and_then(|v| v.as_u64()).unwrap_or(0) as usize);
         sh.locked = b(o, "locked", false);
         sh.name = s(o, "name");
+        sh.tabs = o.get("tabs").and_then(|v| v.as_array()).into_iter().flatten().filter_map(pt).filter(|p| p.x.is_finite() && p.y.is_finite()).take(10_000).collect();
         if let Some(Value::Object(m)) = o.get("lbrn_attributes") {
             sh.extra_attrs = m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string())).collect();
         }
         const KNOWN: &[&str] = &[
-            "type", "layer", "transform", "locked", "name", "lbrn_attributes", "points", "segments", "width", "height", "corner_radius", "radius_x", "radius_y", "sides", "text", "font", "case", "weld", "letter_spacing", "variable", "outline", "file", "source_file", "brightness", "contrast", "gamma", "invert", "dither", "children",
+            "type", "layer", "transform", "locked", "name", "tabs", "lbrn_attributes", "points", "segments", "width", "height", "corner_radius", "radius_x", "radius_y", "sides", "text", "font", "case", "weld", "letter_spacing", "variable", "outline", "file", "source_file", "brightness", "contrast", "gamma", "invert", "dither", "children",
         ];
         for (k, v) in o.iter().filter(|(k, _)| !KNOWN.contains(&k.as_str())) {
             sh.extra_attrs.push((format!("{KEEP}{k}"), v.to_string()));
@@ -637,7 +643,7 @@ mod tests {
         v["format_version"] = json!(2);
         v["future_top"] = json!({ "x": 1 });
         v["project"]["material_library"] = json!(["oak"]);
-        v["project"]["shapes"][1]["tabs"] = json!([0.5, 0.25]);
+        v["project"]["shapes"][1]["engrave_depth"] = json!([0.5, 0.25]);
         v["project"]["layers"][0]["material"] = json!("oak 3 mm");
         let img = {
             let mut b = Vec::new();
@@ -655,7 +661,7 @@ mod tests {
         let w: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(w["future_top"], json!({ "x": 1 }));
         assert_eq!(w["project"]["material_library"], json!(["oak"]));
-        assert_eq!(w["project"]["shapes"][1]["tabs"], json!([0.5, 0.25]));
+        assert_eq!(w["project"]["shapes"][1]["engrave_depth"], json!([0.5, 0.25]));
         assert_eq!(w["project"]["layers"][0]["material"], json!("oak 3 mm"));
         // a LightBurn save leaves them out (and says so: see newer_fields), but stays readable
         let lbrn = crate::lbrn::save_string(&l.doc, &l.kept);

@@ -114,6 +114,7 @@ pub enum Tool {
     Dimension,
     Relate,
     MirrorLine,
+    Tabs,
 }
 
 impl Tool {
@@ -138,6 +139,7 @@ impl Tool {
             Tool::Dimension => Action::ToolDimension,
             Tool::Relate => Action::ToolRelate,
             Tool::MirrorLine => Action::ToolMirrorLine,
+            Tool::Tabs => Action::ToolTabs,
         }
     }
     pub fn hint(self) -> &'static str {
@@ -147,6 +149,7 @@ impl Tool {
             Tool::Line => "Click to add points · rest on the last point to switch the next segment to an arc · Shift locks horizontal / 45° / vertical · double-click or Enter finishes · click the first point or press C to close",
             Tool::Relate => "Click nodes, lines or circles (one or two), then pick a relation above · click a relation tag to remove it",
             Tool::MirrorLine => "Click a straight edge or construction line to mirror the selection about it",
+            Tool::Tabs => "Click on an outline to add a tab · click a tab to remove it · set the tab width in the layer's settings",
             Tool::Rect => "Drag to draw · Shift = square · Ctrl = from centre",
             Tool::Ellipse => "Drag to draw · Shift = circle · Ctrl = from centre",
             Tool::Polygon => "Drag to draw · Ctrl = from centre · set sides in Properties",
@@ -1045,16 +1048,111 @@ impl App {
     /// The design as the laser will run it: with a rotary, distances around the object become rotary travel
     /// (and the G-code uses A instead of Y for an A-axis rotary). The preview keeps showing the flat design.
     pub fn machine_job(&self) -> gcode::Job {
+        self.machine_job_at(&gcode::Placement::absolute(&self.settings.device))
+    }
+
+    /// The same, placed on the laser as `place` says (Start from).
+    pub fn machine_job_at(&self, place: &gcode::Placement) -> gcode::Job {
         let dev = &self.settings.device;
         if !self.rotary_on() {
-            return gcode::build_job(&self.doc, dev, None);
+            return gcode::build_job_placed(&self.doc, dev, None, place);
         }
         let d = crate::rotary::machine_doc(&self.doc, &dev.rotary, dev.height);
-        let mut job = gcode::build_job(&d, dev, None);
+        let mut job = gcode::build_job_placed(&d, dev, None, place);
         if dev.rotary.axis == crate::rotary::RotaryAxis::A && dev.controller.family() == gcode::Family::GCode {
             job.gcode = crate::rotary::y_to_a(&job.gcode);
         }
         job
+    }
+
+    /// Where the next job goes on the laser (the Laser panel's Start from). `for_file`: a saved G-code file,
+    /// which runs later from wherever the head is then. Only G-code lasers can start anywhere but the
+    /// design's own position.
+    pub fn job_placement(&self, for_file: bool) -> Result<gcode::Placement, String> {
+        let dev = &self.settings.device;
+        let js = self.settings.job_start;
+        let mut p = gcode::Placement::absolute(dev);
+        if dev.controller.family() != gcode::Family::GCode {
+            return Ok(p);
+        }
+        p.anchor = js.anchor;
+        // the laser's 0,0 on the bed: moved by "Set origin here" (G92); unknown if that was done unhomed
+        let origin = if for_file { Some((0.0, 0.0)) } else { self.laser.origin };
+        let o = origin.unwrap_or((0.0, 0.0));
+        let bed_here = |o: (f64, f64)| {
+            let b = gcode::bed_box(dev);
+            BBox { min: p2(b.min.x - o.0, b.min.y - o.1), max: p2(b.max.x - o.0, b.max.y - o.1) }
+        };
+        // after "Set origin here" on an unhomed laser BurnCraft doesn't know how the laser's coordinates sit on the
+        // bed, so it can't put a job on a point of the bed (or the head's position) safely
+        let unknown_origin = "The origin was moved (Set origin here) before the laser was homed, so BurnCraft can't tell where this start point is. Press Clear origin (or home and set it again), or use Absolute coordinates.";
+        match js.from {
+            gcode::StartFrom::Absolute => {
+                // the shapes left out are the ones off the real bed, after a moved origin too
+                if let Some(o) = origin {
+                    p.bed = Some(bed_here(o));
+                }
+            }
+            gcode::StartFrom::UserOrigin => {
+                if origin.is_none() {
+                    return Err(unknown_origin.into());
+                }
+                let t = p2(js.user_origin.0 - o.0, js.user_origin.1 - o.1);
+                p.target = Some(t);
+                p.end = t;
+                p.bed = origin.map(bed_here);
+            }
+            gcode::StartFrom::CurrentPosition if for_file => {
+                // the file moves relative to where the head is when it starts (G91), so it changes none of
+                // the laser's coordinate settings
+                p.target = Some(P2::default());
+                p.bed = None;
+                p.relative = true;
+            }
+            gcode::StartFrom::CurrentPosition => {
+                if !self.laser.connected {
+                    return Err("Start from: Current position needs to know where the head is. Connect to the laser first.".into());
+                }
+                if origin.is_none() {
+                    return Err(unknown_origin.into());
+                }
+                // the position is only right once the head has stopped
+                if !self.laser.state.starts_with("Idle") {
+                    return Err(format!("Start from: Current position needs the head to be still, and the laser says \u{201c}{}\u{201d}. Wait until it's Idle, then try again.", self.laser.state));
+                }
+                let pos = self.laser.pos;
+                let t = if self.laser.machine_pos { p2(pos.0 - o.0, pos.1 - o.1) } else { p2(pos.0, pos.1) };
+                p.target = Some(t);
+                p.start = t;
+                p.end = t;
+                p.return_to = Some(t);
+                p.bed = (self.laser.homed && origin.is_some()).then(|| bed_here(o));
+            }
+        }
+        Ok(p)
+    }
+
+    /// Send a placed job's (or its frame's) G-code. When the bed position isn't known (Current position on a
+    /// laser that wasn't homed) the edges can't be checked: BurnCraft checks the job is no bigger than the
+    /// work area, and says so.
+    fn send_placed(&mut self, lines: Vec<String>, job: &gcode::Job, place: &gcode::Placement, now: f64) -> bool {
+        if place.bed.is_some() {
+            return self.send_gcode(lines, now);
+        }
+        let mut b = BBox::EMPTY;
+        for m in &job.moves {
+            b.add(m.from);
+            b.add(m.to);
+        }
+        let d = &self.settings.device;
+        let check_y = !(self.rotary_on() && d.rotary.axis == crate::rotary::RotaryAxis::Y);
+        if !b.is_empty() && (b.width() > d.width + 0.001 || (check_y && b.height() > d.height + 0.001)) {
+            self.error("This job is bigger than the work area, so it wasn't sent.", now);
+            return false;
+        }
+        self.toast("The laser wasn't homed, so BurnCraft can't check that this stays on the bed (only that it's no bigger than the bed). Frame it first.", now);
+        self.laser.send(Cmd::Send(lines));
+        true
     }
 
     /// Send G-code lines to the connected laser, unless a move would leave the work area (then say so and
@@ -1435,7 +1533,12 @@ impl App {
             },
             Action::SaveAs => self.save_as(now),
             Action::ExportGcode => {
-                let job = self.machine_job();
+                // a G-code file is placed as Start from says (Current position: from wherever the head is
+                // when the file runs)
+                let job = match self.job_placement(true) {
+                    Ok(p) => self.machine_job_at(&p),
+                    Err(_) => self.machine_job(),
+                };
                 let name = self.gcode_file_name(job.seconds);
                 let ruida = self.settings.device.controller == gcode::Controller::Ruida;
                 let k40 = self.settings.device.controller == gcode::Controller::K40Nano;
@@ -1702,8 +1805,15 @@ impl App {
                     return;
                 }
                 // frame exactly what Start would burn (shapes off the bed, hidden layers and construction lines
-                // are left out; with a rotary, where the rotary will actually move)
-                let job = self.machine_job();
+                // are left out; with a rotary, where the rotary will actually move; placed as Start from says)
+                let place = match self.job_placement(false) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.error(e, now);
+                        return;
+                    }
+                };
+                let job = self.machine_job_at(&place);
                 let Some(mut lines) = gcode::frame_gcode(&job, self.settings.device.rapid_speed) else {
                     self.job = Some(job);
                     self.error("Nothing to frame: no layer with Burn switched on has shapes inside the bed.", now);
@@ -1712,9 +1822,9 @@ impl App {
                 if self.rotary_on() && self.settings.device.rotary.axis == crate::rotary::RotaryAxis::A {
                     lines = lines.iter().map(|l| crate::rotary::y_to_a(l).trim_end().to_string()).collect();
                 }
-                self.job = Some(job);
                 self.warn_if_not_homed(now);
-                self.send_gcode(lines, now);
+                self.send_placed(lines, &job, &place, now);
+                self.job = Some(job);
             }
             #[cfg(not(usb_lasers))]
             Action::LaserStart | Action::LaserFrame | Action::LaserHome | Action::LaserStop if matches!(self.settings.device.controller, gcode::Controller::EzCad2 | gcode::Controller::K40Nano) => {
@@ -1836,7 +1946,15 @@ impl App {
                 self.advance_variable_text(now);
             }
             Action::LaserStart => {
-                let job = self.machine_job();
+                let place = if self.laser.connected { self.job_placement(false) } else { Ok(gcode::Placement::absolute(&self.settings.device)) };
+                let place = match place {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.error(e, now);
+                        return;
+                    }
+                };
+                let job = self.machine_job_at(&place);
                 if self.rotary_on() {
                     let now2 = now;
                     for w in crate::rotary::warnings(&self.doc, &self.settings.device.rotary, self.settings.units) {
@@ -1854,7 +1972,7 @@ impl App {
                     self.error(format!("{} shape(s) outside the bed are left out of this job.", job.skipped_outside), now);
                 }
                 self.warn_if_not_homed(now);
-                if !self.send_gcode(job.gcode.lines().map(|l| l.to_string()).collect(), now) {
+                if !self.send_placed(job.gcode.lines().map(|l| l.to_string()).collect(), &job, &place, now) {
                     self.job = Some(job);
                     return;
                 }
@@ -1881,6 +1999,7 @@ impl App {
             Action::ToolArc => self.set_tool(Tool::Arc),
             Action::ToolStar => self.set_tool(Tool::Star),
             Action::ToolTrim => self.set_tool(Tool::Trim),
+            Action::ToolTabs => self.set_tool(Tool::Tabs),
             Action::ToolFillet => self.set_tool(Tool::Fillet),
             Action::ToolWand => self.set_tool(Tool::Wand),
             Action::ToolLasso => self.set_tool(Tool::Lasso),

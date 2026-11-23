@@ -313,10 +313,136 @@ pub struct Job {
     pub travel_seconds: f64,
     /// Shapes left out because they are outside (or hang over the edge of) the work area.
     pub skipped_outside: usize,
+    /// Where Frame brings the head back to afterwards (the start point of a Current Position job).
+    pub return_to: Option<P2>,
+}
+
+/// Where a job is placed on the laser ("Start from").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum StartFrom {
+    /// The design's own position: the bed's 0,0 is the design's 0,0.
+    #[default]
+    Absolute,
+    /// The job's anchor point goes to a saved point on the bed.
+    UserOrigin,
+    /// The job's anchor point goes where the head is when the job starts.
+    CurrentPosition,
+}
+
+impl StartFrom {
+    pub const ALL: [StartFrom; 3] = [StartFrom::Absolute, StartFrom::UserOrigin, StartFrom::CurrentPosition];
+    pub fn label(self) -> &'static str {
+        match self {
+            StartFrom::Absolute => "Absolute coordinates",
+            StartFrom::UserOrigin => "User origin",
+            StartFrom::CurrentPosition => "Current position",
+        }
+    }
+}
+
+/// The Laser panel's job placement choices, kept in the settings.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct JobStart {
+    pub from: StartFrom,
+    /// Which point of the job goes to the start point: [0 left, 1 centre, 2 right; 0 bottom, 1 middle, 2 top].
+    pub anchor: [u8; 2],
+    /// The user origin, in mm on the bed.
+    pub user_origin: (f64, f64),
+}
+
+impl Default for JobStart {
+    fn default() -> Self {
+        JobStart { from: StartFrom::Absolute, anchor: [0, 0], user_origin: (0.0, 0.0) }
+    }
+}
+
+/// Where and how one job is put on the laser (see `StartFrom`).
+#[derive(Clone, Debug)]
+pub struct Placement {
+    /// Move the job so its anchor point lands here (laser coordinates). None: leave the design where it is.
+    pub target: Option<P2>,
+    pub anchor: [u8; 2],
+    /// The work area in laser coordinates, or None when it isn't known (an unhomed laser with Current
+    /// position): then nothing is left out for being off the bed, and the caller checks the job's size.
+    pub bed: Option<BBox>,
+    /// Where the head is when the job starts, and where it goes at the end.
+    pub start: P2,
+    pub end: P2,
+    /// Lines before the job and after it (a saved Current position job makes its start point 0,0 with G92).
+    pub before: Vec<String>,
+    pub after: Vec<String>,
+    pub return_to: Option<P2>,
+    /// Write every move relative to the last (G91): a saved file that starts wherever the head is, without
+    /// changing the laser's coordinate settings.
+    pub relative: bool,
+}
+
+impl Placement {
+    pub fn absolute(dev: &Device) -> Placement {
+        Placement { target: None, anchor: [0, 0], bed: Some(bed_box(dev)), start: P2::default(), end: P2::default(), before: Vec::new(), after: Vec::new(), return_to: None, relative: false }
+    }
+}
+
+/// Rewrite a job's moves relative to the previous position (G91), starting from 0,0 (where the head is when
+/// the file starts). The deltas come from the written (rounded) positions, so they add up exactly. The file
+/// switches back to absolute (G90) at the end.
+pub fn to_relative(gcode: &str) -> String {
+    let mut out = String::with_capacity(gcode.len() + 64);
+    let (mut x, mut y) = (0.0f64, 0.0f64);
+    let r3 = |v: f64| (v * 1000.0).round() / 1000.0;
+    for line in gcode.lines() {
+        let t = line.trim();
+        if t == ABSOLUTE {
+            out.push_str("G91 ; every move is from where the head is: the job starts at the head's position\n");
+            continue;
+        }
+        if t == "M2" {
+            out.push_str(&format!("{ABSOLUTE}\nM2\n"));
+            continue;
+        }
+        if t.starts_with("G0 ") || t.starts_with("G1 ") {
+            let words: Vec<String> = t
+                .split(' ')
+                .map(|w| {
+                    let (k, v) = w.split_at(1);
+                    match (k, v.parse::<f64>()) {
+                        ("X", Ok(nx)) => {
+                            let d = r3(nx - x);
+                            x = nx;
+                            format!("X{}", fmt_num(d))
+                        }
+                        ("Y", Ok(ny)) => {
+                            let d = r3(ny - y);
+                            y = ny;
+                            format!("Y{}", fmt_num(d))
+                        }
+                        _ => w.to_string(),
+                    }
+                })
+                .collect();
+            out.push_str(&words.join(" "));
+            out.push('\n');
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// The point of a box that an anchor names ([0 left, 1 centre, 2 right; 0 bottom, 1 middle, 2 top]).
+pub fn anchor_point(b: &BBox, anchor: [u8; 2]) -> P2 {
+    let k = |lo: f64, hi: f64, a: u8| lo + (hi - lo) * a.min(2) as f64 / 2.0;
+    p2(k(b.min.x, b.max.x, anchor[0]), k(b.min.y, b.max.y, anchor[1]))
 }
 
 struct Emitter<'a> {
     dev: &'a Device,
+    /// The work area in job coordinates, when known (overscan stays inside it).
+    bed: Option<BBox>,
+    /// Tabs placed by hand, in job coordinates, with the layers of the shape they were placed on.
+    tab_points: Vec<(P2, Vec<usize>)>,
     out: String,
     pos: P2,
     moves: Vec<Move>,
@@ -340,6 +466,28 @@ impl<'a> Emitter<'a> {
         self.secs += d / self.dev.rapid_speed.max(1.0);
         self.travel_secs += d / self.dev.rapid_speed.max(1.0);
         self.moves.push(Move { from: self.pos, to, power: 0.0, layer: 0, speed: self.dev.rapid_speed });
+        self.pos = to;
+    }
+    /// A laser-off move at burning speed (overscan, and gaps within a scan line), so the head doesn't stop
+    /// and start between burns.
+    fn coast(&mut self, to: P2, speed: f64) {
+        if self.pos.dist(to) < MIN_MOVE {
+            return;
+        }
+        let f = speed * FEED_PER_MINUTE;
+        let mut line = format!("G1 X{} Y{} S0", f3(to.x), f3(to.y));
+        self.last_s = 0.0;
+        if (f - self.last_f).abs() > 1e-6 {
+            line.push_str(&format!(" F{}", fmt_num((f * 100.0).round() / 100.0)));
+            self.last_f = f;
+        }
+        line.push('\n');
+        self.out.push_str(&line);
+        let d = self.pos.dist(to);
+        self.travel_len += d;
+        self.secs += d / speed.max(0.1);
+        self.travel_secs += d / speed.max(0.1);
+        self.moves.push(Move { from: self.pos, to, power: 0.0, layer: 0, speed });
         self.pos = to;
     }
     fn cut(&mut self, to: P2, power_pct: f64, speed: f64, layer: usize) {
@@ -397,35 +545,72 @@ pub fn laser_on(dev: &Device, cs: &CutSetting) -> &'static str {
 pub const LASER_OFF: &str = "M5";
 
 pub fn build_job(doc: &Document, dev: &Device, only: Option<&[usize]>) -> Job {
-    let mut em = Emitter { dev, out: String::new(), pos: P2::default(), moves: Vec::new(), cut_len: 0.0, travel_len: 0.0, secs: 0.0, cut_secs: 0.0, travel_secs: 0.0, last_f: -1.0, last_s: -1.0 };
+    build_job_placed(doc, dev, only, &Placement::absolute(dev))
+}
+
+/// Build the job, placed on the laser as `place` says (Start from).
+pub fn build_job_placed(doc: &Document, dev: &Device, only: Option<&[usize]>, place: &Placement) -> Job {
+    let mut em = Emitter { dev, bed: place.bed, tab_points: Vec::new(), out: String::new(), pos: place.start, moves: Vec::new(), cut_len: 0.0, travel_len: 0.0, secs: 0.0, cut_secs: 0.0, travel_secs: 0.0, last_f: -1.0, last_s: -1.0 };
     em.out.push_str(&format!("; BurnCraft {} - GRBL G-code\n; Device: {} ({} x {} mm)\n", env!("CARGO_PKG_VERSION"), dev.name, dev.width, dev.height));
     // Header: "G00 G17 G40 " (rapid, XY plane, no cutter compensation) + G21 (G20 in inches) + G54,
     // then G90 for absolute coordinates
     em.out.push_str(&format!("{HEADER_MODES}G21 {HEADER_WORK}\n{ABSOLUTE}\n"));
     em.out.push_str(&format!("; Controller: {}\n", dev.controller.label()));
     em.out.push_str(dev.controller.header());
+    for l in &place.before {
+        em.out.push_str(l);
+        em.out.push('\n');
+    }
 
     let burns = |layer: usize| doc.cut(layer).map(|c| c.output).unwrap_or(layer < COLOR_LAYERS);
-    let mut leaves: Vec<(Shape, Xform)> = Vec::new();
-    // Only burn what fits on the bed: anything outside or over the edge could crash the head.
-    let bed = bed_box(dev);
-    let mut skipped_outside = 0;
-    for (i, s) in doc.shapes.iter().enumerate() {
-        if only.map(|o| o.contains(&i)).unwrap_or(true) {
+    let bbox_of = |l: &Shape, x: &Xform| {
+        let mut probe = l.clone();
+        probe.xform = *x;
+        probe.bbox()
+    };
+    let chosen: Vec<&Shape> = doc.shapes.iter().enumerate().filter(|(i, _)| only.map(|o| o.contains(i)).unwrap_or(true)).map(|(_, s)| s).collect();
+    let mut per_shape: Vec<Vec<(Shape, Xform)>> = chosen
+        .iter()
+        .map(|s| {
             let mut mine = Vec::new();
             s.leaves(Xform::IDENTITY, &mut mine);
+            mine
+        })
+        .collect();
+    // Start from: move the whole job so its anchor point lands on the start point
+    let mut shift = P2::default();
+    if let Some(t) = place.target {
+        let b = per_shape.iter().flatten().filter(|(l, _)| burns(l.layer)).fold(BBox::EMPTY, |b, (l, x)| b.union(&bbox_of(l, x)));
+        if !b.is_empty() {
+            shift = t - anchor_point(&b, place.anchor);
+        }
+        em.out.push_str(&format!("; Start from: the job's anchor point at X{} Y{}\n", f3(t.x), f3(t.y)));
+    }
+    let moved = Xform::translate(shift.x, shift.y);
+    for (s, mine) in chosen.iter().zip(per_shape.iter_mut()) {
+        for (_, x) in mine.iter_mut() {
+            *x = x.then(moved);
+        }
+        if !s.tabs.is_empty() {
+            let mut layers: Vec<usize> = mine.iter().map(|(l, _)| l.layer).collect();
+            layers.sort_unstable();
+            layers.dedup();
+            em.tab_points.extend(s.tabs.iter().map(|p| (moved.apply(s.xform.apply(*p)), layers.clone())));
+        }
+    }
+    let mut leaves: Vec<(Shape, Xform)> = Vec::new();
+    // Only burn what fits on the bed: anything outside or over the edge could crash the head.
+    let mut skipped_outside = 0;
+    for mut mine in per_shape {
+        if let Some(bed) = place.bed {
             let before = mine.iter().filter(|(l, _)| burns(l.layer)).count();
-            mine.retain(|(l, x)| {
-                let mut probe = l.clone();
-                probe.xform = *x;
-                bed.contains_box(&probe.bbox())
-            });
+            mine.retain(|(l, x)| bed.contains_box(&bbox_of(l, x)));
             // count whole shapes (a group of 3000 pieces is one shape), and only ones that would burn
             if mine.iter().filter(|(l, _)| burns(l.layer)).count() < before {
                 skipped_outside += 1;
             }
-            leaves.extend(mine);
         }
+        leaves.extend(mine);
     }
     if skipped_outside > 0 {
         em.out.push_str(&format!("; {skipped_outside} shape(s) outside the work area were left out\n"));
@@ -458,8 +643,16 @@ pub fn build_job(doc: &Document, dev: &Device, only: Option<&[usize]>) -> Job {
             em.out.push_str("M9\n");
         }
     }
-    em.out.push_str(&format!("G1 S0\n{LASER_OFF}\nG0 X0 Y0\nM2\n"));
-    Job { moves: em.moves, gcode: em.out, cut_length: em.cut_len, travel_length: em.travel_len, seconds: em.secs, cut_seconds: em.cut_secs, travel_seconds: em.travel_secs, skipped_outside }
+    em.out.push_str(&format!("G1 S0\n{LASER_OFF}\nG0 X{} Y{}\n", f3(place.end.x), f3(place.end.y)));
+    for l in &place.after {
+        em.out.push_str(l);
+        em.out.push('\n');
+    }
+    em.out.push_str("M2\n");
+    if place.relative {
+        em.out = to_relative(&em.out);
+    }
+    Job { moves: em.moves, gcode: em.out, cut_length: em.cut_len, travel_length: em.travel_len, seconds: em.secs, cut_seconds: em.cut_secs, travel_seconds: em.travel_secs, skipped_outside, return_to: place.return_to }
 }
 
 fn vector_lines(on: &[&(Shape, Xform)]) -> Vec<Vec<P2>> {
@@ -496,31 +689,112 @@ fn containment(lines: &[Vec<P2>]) -> Vec<Vec<usize>> {
     inside
 }
 
+/// One line to burn: its pieces in order (more than one when tabs split a closed outline), and whether it is
+/// a whole closed outline (so it can start at any of its points).
+struct Item {
+    pieces: Vec<Vec<P2>>,
+    whole_loop: bool,
+}
+
+/// Split the closed lines that get tabs: tabs placed by hand on the outlines they sit on, otherwise the
+/// layer's automatic tabs.
+fn tab_items(lines: Vec<Vec<P2>>, cs: &CutSetting, manual: &[P2]) -> Vec<Item> {
+    use crate::toolpath as tp;
+    let n = lines.len();
+    let closed: Vec<bool> = lines.iter().map(|l| is_closed(l) && l.len() > 3).collect();
+    // a tab placed by hand goes on the nearest closed outline within reach (kerf moves outlines a little)
+    let reach = 1.0 + cs.kerf.abs();
+    let mut by_hand: Vec<Vec<f64>> = vec![Vec::new(); n];
+    if !manual.is_empty() {
+        let boxes: Vec<BBox> = lines.iter().map(|l| BBox::from_points(l)).collect();
+        for p in manual {
+            let mut best: Option<(usize, f64, f64)> = None;
+            for i in (0..n).filter(|&i| closed[i]) {
+                let b = boxes[i];
+                if p.x < b.min.x - reach || p.x > b.max.x + reach || p.y < b.min.y - reach || p.y > b.max.y + reach {
+                    continue;
+                }
+                let (s, d) = tp::project(&lines[i], *p);
+                if d <= reach && best.map_or(true, |(_, _, bd)| d < bd) {
+                    best = Some((i, s, d));
+                }
+            }
+            if let Some((i, s, _)) = best {
+                by_hand[i].push(s);
+            }
+        }
+    }
+    let t = &cs.tabs;
+    let depth = if t.on && t.skip_inner { tp::nesting_depth(&lines) } else { vec![0; n] };
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(i, l)| {
+            if !closed[i] {
+                return Item { pieces: vec![l], whole_loop: false };
+            }
+            // (hand-placed tabs that would leave less cut than tab are ignored, so a small outline is never
+            // lost altogether)
+            let hand = std::mem::take(&mut by_hand[i]);
+            let at = if !hand.is_empty() {
+                if tp::length(&l) >= 2.0 * t.width * hand.len() as f64 {
+                    hand
+                } else {
+                    Vec::new()
+                }
+            } else if t.on && !(t.skip_inner && depth[i] % 2 == 1) {
+                tp::auto_tab_positions(tp::length(&l), t)
+            } else {
+                Vec::new()
+            };
+            if at.is_empty() {
+                Item { pieces: vec![l], whole_loop: true }
+            } else {
+                Item { pieces: tp::split_at_tabs(&l, &at, t.width), whole_loop: false }
+            }
+        })
+        .collect()
+}
+
 fn emit_lines(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
-    let lines = vector_lines(on);
+    let lines = crate::toolpath::apply_kerf(vector_lines(on), cs.kerf);
     let o = em.dev.opt;
     // a shape waits until everything inside it has been cut ("Cut Inner Shapes First")
     let inside = if o.inner_first { containment(&lines) } else { vec![Vec::new(); lines.len()] };
-    let mut done = vec![false; lines.len()];
-    let mut slots: Vec<Option<Vec<P2>>> = lines.into_iter().map(Some).collect();
+    let mine: Vec<P2> = em.tab_points.iter().filter(|(_, ls)| ls.contains(&cs.index)).map(|(p, _)| *p).collect();
+    let items = tab_items(lines, cs, &mine);
+    let mut done = vec![false; items.len()];
+    let mut slots: Vec<Option<Item>> = items.into_iter().map(Some).collect();
     for _ in 0..slots.len() {
         let pos = em.pos;
         let ready = |i: usize| slots[i].is_some() && inside[i].iter().all(|j| done[*j]);
+        // (item, burn it backwards, start at this point of a whole loop / this piece of a tabbed one)
         let (mut best, mut rev, mut start, mut bd) = (usize::MAX, false, 0usize, f64::INFINITY);
-        for (i, l) in slots.iter().enumerate() {
-            let Some(l) = l else { continue };
+        for (i, it) in slots.iter().enumerate() {
+            let Some(it) = it else { continue };
             if !ready(i) {
                 continue;
             }
-            if !o.reduce_travel {
+            if !o.reduce_travel || it.pieces.is_empty() {
                 // shape-list order: the first one that's ready
                 (best, rev, start) = (i, false, 0);
                 break;
             }
-            let closed = is_closed(l);
-            if closed && o.best_start {
+            let l = &it.pieces[0];
+            if it.whole_loop && o.best_start {
                 for (k, p) in l[..l.len() - 1].iter().enumerate() {
                     let d = p.dist(pos);
+                    if d < bd {
+                        (best, rev, start, bd) = (i, false, k, d);
+                    }
+                }
+                continue;
+            }
+            if it.pieces.len() > 1 {
+                // a loop split by tabs: it can begin with any of its pieces
+                let last = if o.best_start { it.pieces.len() } else { 1 };
+                for (k, pc) in it.pieces[..last].iter().enumerate() {
+                    let d = pc[0].dist(pos);
                     if d < bd {
                         (best, rev, start, bd) = (i, false, k, d);
                     }
@@ -531,7 +805,7 @@ fn emit_lines(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
             if d0 < bd {
                 (best, rev, start, bd) = (i, false, 0, d0);
             }
-            if !closed && o.best_direction {
+            if !it.whole_loop && o.best_direction && !is_closed(l) {
                 let d1 = l.last().unwrap().dist(pos);
                 if d1 < bd {
                     (best, rev, start, bd) = (i, true, 0, d1);
@@ -545,22 +819,75 @@ fn emit_lines(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
                 None => break,
             }
         }
-        let mut l = slots[best].take().unwrap();
+        let mut it = slots[best].take().unwrap();
         done[best] = true;
-        if start > 0 {
+        if it.whole_loop && start > 0 {
             // a closed loop starting at another corner
+            let l = &mut it.pieces[0];
             l.pop();
             l.rotate_left(start);
             l.push(l[0]);
+        } else if start > 0 {
+            it.pieces.rotate_left(start);
         }
-        if rev {
-            l.reverse();
-        }
-        em.travel(l[0]);
-        for p in &l[1..] {
-            em.cut(*p, cs.max_power, cs.speed, cs.index);
+        for mut l in it.pieces {
+            if rev {
+                l.reverse();
+            }
+            em.travel(l[0]);
+            for p in &l[1..] {
+                em.cut(*p, cs.max_power, cs.speed, cs.index);
+            }
         }
     }
+}
+
+/// The overscan for a layer's scan lines. Only G-code lasers: galvo mirrors don't need a run-up, and Ruida and
+/// K40 jobs are written as their own moves, where a laser-off move at burning speed isn't kept.
+fn overscan(dev: &Device, cs: &CutSetting) -> f64 {
+    if dev.controller.family() != Family::GCode {
+        0.0
+    } else {
+        crate::toolpath::overscan_distance(cs.speed, cs.overscan_percent)
+    }
+}
+
+/// One scan line of a fill or picture: its burns `(from, to, power %)`, all in the same direction. With
+/// overscan the head runs on at burning speed (laser off) before the first burn, across short gaps, and after
+/// the last, staying on the bed.
+fn emit_row(em: &mut Emitter, segs: &[(P2, P2, f64)], cs: &CutSetting, over: f64) {
+    let Some(first) = segs.first() else { return };
+    let dir = (segs[segs.len() - 1].1 - first.0).normalized();
+    if over <= 1e-6 || dir.len() < 0.5 {
+        for (a, b, p) in segs {
+            em.travel(*a);
+            em.cut(*b, *p, cs.speed, cs.index);
+        }
+        return;
+    }
+    let lead_in = |em: &mut Emitter, a: P2| {
+        let r = crate::toolpath::room(a, dir * -1.0, over, em.bed);
+        em.travel(a - dir * r);
+        em.coast(a, cs.speed);
+    };
+    let lead_out = |em: &mut Emitter, b: P2| {
+        let r = crate::toolpath::room(b, dir, over, em.bed);
+        em.coast(b + dir * r, cs.speed);
+    };
+    lead_in(em, first.0);
+    for (i, (a, b, p)) in segs.iter().enumerate() {
+        if i > 0 {
+            let prev = segs[i - 1].1;
+            if prev.dist(*a) <= 2.0 * over {
+                em.coast(*a, cs.speed);
+            } else {
+                lead_out(em, prev);
+                lead_in(em, *a);
+            }
+        }
+        em.cut(*b, *p, cs.speed, cs.index);
+    }
+    lead_out(em, segs[segs.len() - 1].1);
 }
 
 /// Scanline fill of all closed outlines (even-odd), at `interval` spacing and `angle` degrees.
@@ -612,6 +939,10 @@ pub fn frame_gcode(job: &Job, rapid_speed: f64) -> Option<Vec<String>> {
     let pts = [b.min, p2(b.max.x, b.min.y), b.max, p2(b.min.x, b.max.y), b.min];
     let mut lines = vec!["G90".to_string(), "G21".to_string()];
     for p in pts {
+        lines.push(format!("G1 X{:.3} Y{:.3} F{:.0} S0", p.x, p.y, f));
+    }
+    // a Current position job starts where the head was: go back there
+    if let Some(p) = job.return_to {
         lines.push(format!("G1 X{:.3} Y{:.3} F{:.0} S0", p.x, p.y, f));
     }
     Some(lines)
@@ -714,6 +1045,7 @@ pub fn islands(rings: &[Vec<P2>]) -> Vec<Vec<Vec<P2>>> {
 }
 
 fn emit_fill(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
+    let over = overscan(em.dev, cs);
     let rings: Vec<Vec<P2>> = vector_lines(on).into_iter().filter(|l| is_closed(l)).collect();
     let groups: Vec<Vec<Vec<P2>>> = if cs.fill_individually { islands(&rings) } else { vec![rings] };
     let mut angles = vec![cs.angle];
@@ -725,11 +1057,8 @@ fn emit_fill(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
             let rows = fill_segments(group, cs.interval.max(0.01), *ang);
             for (ri, row) in rows.into_iter().enumerate() {
                 let flip = cs.bidir && ri % 2 == 1;
-                let segs: Vec<(P2, P2)> = if flip { row.into_iter().rev().map(|(a, b)| (b, a)).collect() } else { row };
-                for (a, b) in segs {
-                    em.travel(a);
-                    em.cut(b, cs.max_power, cs.speed, cs.index);
-                }
+                let segs: Vec<(P2, P2, f64)> = if flip { row.into_iter().rev().map(|(a, b)| (b, a, cs.max_power)).collect() } else { row.into_iter().map(|(a, b)| (a, b, cs.max_power)).collect() };
+                emit_row(em, &segs, cs, over);
             }
         }
     }
@@ -747,6 +1076,7 @@ pub fn image_power(g: u8, mode: Dither, cs: &CutSetting) -> Option<f64> {
 }
 
 fn emit_image(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
+    let over = overscan(em.dev, cs);
     for (s, x) in on {
         let ShapeKind::Bitmap { w, h, data, adjust } = &s.kind else { continue };
         let gray = imaging::adjusted_gray(data, adjust);
@@ -775,6 +1105,7 @@ fn emit_image(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
             let order: Vec<usize> = if ltr { (0..n).collect() } else { (0..n).rev().collect() };
             // runs of equal power
             let mut run: Option<(P2, f64)> = None;
+            let mut segs: Vec<(P2, P2, f64)> = Vec::new();
             for i in order {
                 let (xa, xb) = if ltr { (xs[i], xs[i + 1]) } else { (xs[i + 1], xs[i]) };
                 let mid = p2((xa + xb) / 2.0, y);
@@ -785,19 +1116,18 @@ fn emit_image(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
                     }
                     (prev, cur) => {
                         if let Some((st, rp)) = prev {
-                            em.travel(st);
-                            em.cut(p2(xa, y), rp, cs.speed, cs.index);
+                            segs.push((st, p2(xa, y), rp));
                         }
                         run = cur.map(|p| (p2(xa, y), p));
                     }
                 }
                 if i == if ltr { n - 1 } else { 0 } {
                     if let Some((st, rp)) = run.take() {
-                        em.travel(st);
-                        em.cut(p2(xb, y), rp, cs.speed, cs.index);
+                        segs.push((st, p2(xb, y), rp));
                     }
                 }
             }
+            emit_row(em, &segs, cs, over);
             row += 1;
             y -= step;
             if row > 100_000 {
@@ -963,5 +1293,145 @@ mod laser_on_tests {
         d.sync_cuts();
         let job = build_job(&d, &dev, None);
         assert!(job.gcode.starts_with(';') && job.gcode.contains("G00 G17 G40 G21 G54\nG90\n") && job.gcode.contains("\nM4\n") && job.gcode.contains("\nM5\n"));
+    }
+
+    fn one_rect(x: f64, y: f64, w: f64, h: f64) -> Document {
+        let mut doc = Document::default();
+        doc.shapes.push(Shape::new(ShapeKind::Rect { w, h, cr: 0.0 }, Xform::translate(x, y), 0));
+        doc.sync_cuts();
+        doc
+    }
+
+    fn burn_box(job: &Job) -> BBox {
+        let mut b = BBox::EMPTY;
+        for m in job.moves.iter().filter(|m| m.power > 0.0) {
+            b.add(m.from);
+            b.add(m.to);
+        }
+        b
+    }
+
+    #[test]
+    fn kerf_moves_cuts_out_so_parts_keep_their_size() {
+        let mut doc = one_rect(50.0, 50.0, 20.0, 20.0);
+        doc.cut_mut(0).kerf = 0.1;
+        let b = burn_box(&build_job(&doc, &Device::default(), None));
+        assert!((b.width() - 20.2).abs() < 1e-3 && (b.height() - 20.2).abs() < 1e-3, "{b:?}");
+        // two overlapping parts are both cut in full, not merged into one outline
+        let mut two = one_rect(50.0, 50.0, 20.0, 20.0);
+        two.shapes.push(Shape::new(ShapeKind::Rect { w: 20.0, h: 20.0, cr: 0.0 }, Xform::translate(60.0, 55.0), 0));
+        two.cut_mut(0).kerf = 0.1;
+        let job = build_job(&two, &Device::default(), None);
+        assert!(job.cut_length > 2.0 * 80.0, "{}", job.cut_length);
+        // fills aren't moved
+        doc.cut_mut(0).mode = CutMode::Fill;
+        doc.cut_mut(0).overscan_percent = 0.0;
+        assert!(burn_box(&build_job(&doc, &Device::default(), None)).width() <= 20.0 + 1e-9);
+    }
+
+    #[test]
+    fn tabs_leave_uncut_gaps_and_hand_placed_ones_win() {
+        let mut doc = one_rect(50.0, 50.0, 10.0, 10.0);
+        doc.cut_mut(0).tabs = Tabs { on: true, by_count: true, count: 4, width: 1.0, ..Default::default() };
+        let job = build_job(&doc, &Device::default(), None);
+        assert!((job.cut_length - 36.0).abs() < 1e-6, "{}", job.cut_length);
+        // tabs placed by hand replace the automatic ones on that outline (one, in the middle of the top edge)
+        doc.shapes[0].tabs = vec![p2(0.0, 5.0)];
+        let job = build_job(&doc, &Device::default(), None);
+        assert!((job.cut_length - 39.0).abs() < 1e-6, "{}", job.cut_length);
+        let gap_mid = p2(50.0, 55.0);
+        assert!(job.moves.iter().filter(|m| m.power > 0.0).all(|m| m.from.dist(gap_mid) >= 0.5 - 1e-9 && m.to.dist(gap_mid) >= 0.5 - 1e-9));
+        // and they work with tabs switched off on the layer
+        doc.cut_mut(0).tabs.on = false;
+        assert!((build_job(&doc, &Device::default(), None).cut_length - 39.0).abs() < 1e-6);
+        // a hand-placed tab doesn't cut into a shape on another layer next to it
+        let mut doc = one_rect(50.0, 50.0, 10.0, 10.0);
+        doc.shapes.push(Shape::new(ShapeKind::Rect { w: 10.0, h: 10.0, cr: 0.0 }, Xform::translate(50.0, 65.5), 1));
+        doc.sync_cuts();
+        doc.shapes[0].tabs = vec![p2(0.0, 5.0)];
+        let job = build_job(&doc, &Device::default(), None);
+        assert!((job.cut_length - 79.5).abs() < 1e-6, "{}", job.cut_length);
+        // tabs too wide for a small outline are ignored rather than leaving nothing to cut
+        let mut doc = one_rect(50.0, 50.0, 1.0, 1.0);
+        doc.cut_mut(0).tabs.width = 3.0;
+        doc.shapes[0].tabs = vec![p2(0.0, 0.5)];
+        assert!((build_job(&doc, &Device::default(), None).cut_length - 4.0).abs() < 1e-6);
+        // holes get no automatic tabs (skip holes is on by default)
+        let mut doc = one_rect(50.0, 50.0, 20.0, 20.0);
+        doc.shapes.push(Shape::new(ShapeKind::Rect { w: 10.0, h: 10.0, cr: 0.0 }, Xform::translate(50.0, 50.0), 0));
+        doc.cut_mut(0).tabs = Tabs { on: true, count: 2, width: 1.0, ..Default::default() };
+        assert!((build_job(&doc, &Device::default(), None).cut_length - (80.0 - 2.0 + 40.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn overscan_runs_on_with_the_laser_off_and_stays_on_the_bed() {
+        // a 10 mm fill at 100 mm/s with 2.5% overscan: 2.5 mm before and after each line (rapids at 300)
+        let dev = Device { rapid_speed: 300.0, ..Device::default() };
+        let mut doc = one_rect(50.0, 50.0, 10.0, 10.0);
+        let c = doc.cut_mut(0);
+        (c.mode, c.interval, c.speed, c.overscan_percent) = (CutMode::Fill, 1.0, 100.0, 2.5);
+        let job = build_job(&doc, &dev, None);
+        let coasts: Vec<&Move> = job.moves.iter().filter(|m| m.power == 0.0 && (m.speed - 100.0).abs() < 1e-9).collect();
+        assert_eq!(coasts.len(), 20, "a run-in and a run-out on each of 10 lines");
+        assert!(coasts.iter().all(|m| (m.from.dist(m.to) - 2.5).abs() < 1e-9));
+        assert!(job.gcode.contains(" S0 F6000"), "laser off at burning speed");
+        // against the bed's left edge there's no room before the line: it starts on the edge
+        let mut doc = one_rect(5.0, 50.0, 10.0, 10.0);
+        let c = doc.cut_mut(0);
+        (c.mode, c.interval, c.speed, c.overscan_percent, c.bidir) = (CutMode::Fill, 1.0, 100.0, 2.5, false);
+        let job = build_job(&doc, &dev, None);
+        assert!(job.moves.iter().all(|m| m.to.x >= -1e-5 && m.from.x >= -1e-5));
+        // (the run-out on the right still has room)
+        assert!(job.moves.iter().any(|m| m.power == 0.0 && (m.speed - 100.0).abs() < 1e-9 && (m.to.x - 12.5).abs() < 1e-9));
+        // no overscan: as before
+        doc.cut_mut(0).overscan_percent = 0.0;
+        assert!(build_job(&doc, &dev, None).moves.iter().all(|m| m.power > 0.0 || (m.speed - 100.0).abs() > 1e-9));
+    }
+
+    #[test]
+    fn start_from_moves_the_job_to_its_start_point() {
+        let dev = Device::default();
+        let doc = one_rect(50.0, 50.0, 10.0, 10.0);
+        // the job's centre on (100, 80)
+        let place = Placement { target: Some(p2(100.0, 80.0)), anchor: [1, 1], end: p2(100.0, 80.0), return_to: Some(p2(100.0, 80.0)), ..Placement::absolute(&dev) };
+        let job = build_job_placed(&doc, &dev, None, &place);
+        let b = burn_box(&job);
+        assert!(b.center().dist(p2(100.0, 80.0)) < 1e-9, "{b:?}");
+        assert!(job.gcode.trim_end().ends_with("G0 X100 Y80\nM2"), "ends back at the start point");
+        let frame = frame_gcode(&job, 100.0).unwrap();
+        assert!(frame.last().unwrap().starts_with("G1 X100.000 Y80.000"), "Frame goes back to where the head started");
+        // the bottom-left corner on a user origin
+        let place = Placement { target: Some(p2(10.0, 10.0)), anchor: [0, 0], ..Placement::absolute(&dev) };
+        assert!(burn_box(&build_job_placed(&doc, &dev, None, &place)).min.dist(p2(10.0, 10.0)) < 1e-9);
+        // moved off the bed: left out, as always
+        let place = Placement { target: Some(p2(-50.0, 10.0)), anchor: [0, 0], ..Placement::absolute(&dev) };
+        assert_eq!(build_job_placed(&doc, &dev, None, &place).skipped_outside, 1);
+        // a bed that isn't known (unhomed, current position): nothing is left out, the caller checks the size
+        let place = Placement { target: Some(p2(0.0, 0.0)), anchor: [1, 1], bed: None, relative: true, ..Placement::absolute(&dev) };
+        let job = build_job_placed(&doc, &dev, None, &place);
+        assert_eq!(job.skipped_outside, 0);
+        assert!(burn_box(&job).center().dist(p2(0.0, 0.0)) < 1e-9);
+        // a saved Current position file: relative moves (no G92), back to absolute at the end
+        assert!(!job.gcode.contains("G92") && job.gcode.contains("\nG91 ") && !job.gcode.contains("\nG90\nG91"));
+        assert!(job.gcode.trim_end().ends_with("G90\nM2"));
+        // the moves add up: first to the square's corner (-5, -5), and back to the start at the end
+        let (mut x, mut y) = (0.0, 0.0);
+        let mut first = None;
+        for l in job.gcode.lines().filter(|l| l.starts_with("G0 ") || l.starts_with("G1 X")) {
+            for w in l.split(' ') {
+                if let Some(v) = w.strip_prefix('X') {
+                    x += v.parse::<f64>().unwrap();
+                }
+                if let Some(v) = w.strip_prefix('Y') {
+                    y += v.parse::<f64>().unwrap();
+                }
+            }
+            first.get_or_insert((x, y));
+        }
+        let f = first.unwrap();
+        assert!((f.0 + 5.0).abs() < 1e-9 && (f.1 + 5.0).abs() < 1e-9, "{f:?}");
+        assert!(x.abs() < 1e-9 && y.abs() < 1e-9, "ends where it started: {x} {y}");
+        // absolute: unchanged
+        assert!(burn_box(&build_job(&doc, &dev, None)).center().dist(p2(50.0, 50.0)) < 1e-9);
     }
 }

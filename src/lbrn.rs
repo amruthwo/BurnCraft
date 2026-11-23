@@ -125,6 +125,8 @@ pub fn parse_cut(n: &Node) -> CutSetting {
             "kerf" => cs.kerf = f.unwrap_or(0.0),
             "frequency" => cs.frequency = f.unwrap_or(cs.frequency),
             "floodFill" => cs.fill_individually = b,
+            // BurnCraft's own: tabs (LightBurn ignores it)
+            "BcTabs" => cs.tabs = serde_json::from_str(&v).unwrap_or_default(),
             _ => cs.extra.push((k, v)),
         }
     }
@@ -291,7 +293,7 @@ fn parse_path_data(n: &Node, shared: &mut Shared) -> Option<PathData> {
     Some(PathData { verts, prims })
 }
 
-const KNOWN_ATTRS: &[&str] = &["Type", "CutIndex", "Locked", "W", "H", "Cr", "Rx", "Ry", "N", "Str", "Font", "Data", "File", "VertID", "PrimID", "Gamma", "Contrast", "Brightness", "Name", "HasBackupPath", "ForceCase", "Weld", "LS", "BcCase"];
+const KNOWN_ATTRS: &[&str] = &["Type", "CutIndex", "Locked", "W", "H", "Cr", "Rx", "Ry", "N", "Str", "Font", "Data", "File", "VertID", "PrimID", "Gamma", "Contrast", "Brightness", "Name", "HasBackupPath", "ForceCase", "Weld", "LS", "BcCase", "BcTabs"];
 
 fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Option<Shape> {
     let ty = n.attr("Type").unwrap_or("Path");
@@ -382,6 +384,7 @@ fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Opt
     let mut s = Shape::new(kind, xform, layer);
     s.locked = n.attr_bool("Locked").unwrap_or(false);
     s.name = n.attr("Name").unwrap_or("").to_string();
+    s.tabs = n.attr("BcTabs").map(parse_tabs).unwrap_or_default();
     for (k, v) in &n.attrs {
         if !KNOWN_ATTRS.contains(&k.as_str()) {
             s.extra_attrs.push((k.clone(), v.clone()));
@@ -425,11 +428,29 @@ fn primlist(prims: &[Prim]) -> String {
     s
 }
 
+/// Tabs placed by hand, as `x y;x y;…` (shape coordinates).
+pub fn tabs_attr(tabs: &[P2]) -> String {
+    tabs.iter().map(|p| format!("{} {}", fmt_num((p.x * 1e4).round() / 1e4), fmt_num((p.y * 1e4).round() / 1e4))).collect::<Vec<_>>().join(";")
+}
+
+pub fn parse_tabs(s: &str) -> Vec<P2> {
+    s.split(';')
+        .filter_map(|t| {
+            let mut it = t.split_whitespace().filter_map(|v| v.parse::<f64>().ok());
+            Some(p2(it.next()?, it.next()?)).filter(|p| p.x.is_finite() && p.y.is_finite())
+        })
+        .take(10_000)
+        .collect()
+}
+
 fn shape_node(s: &Shape) -> Node {
     let mut n = Node::new("Shape");
     n.set("Type", s.type_name()).set("CutIndex", s.layer.to_string());
     if s.locked {
         n.set("Locked", "1");
+    }
+    if !s.tabs.is_empty() {
+        n.set("BcTabs", tabs_attr(&s.tabs));
     }
     if !s.name.is_empty() {
         n.set("Name", s.name.clone());
@@ -537,6 +558,9 @@ pub fn cut_node(c: &CutSetting) -> Node {
     }
     if c.frequency != CutSetting::DEFAULT_FREQUENCY {
         v("frequency", fmt_num(c.frequency));
+    }
+    if c.tabs != Tabs::default() {
+        v("BcTabs", serde_json::to_string(&c.tabs).unwrap_or_default());
     }
     for (k, val) in c.extra.iter().filter(|(k, _)| !k.starts_with(crate::burn::KEEP)) {
         v(k, val.clone());

@@ -293,6 +293,39 @@ fn layers(ui: &mut Ui, app: &mut App) {
                     ui.end_row();
                 }
             }
+            if matches!(c.mode, CutMode::Fill | CutMode::FillLine | CutMode::OffsetFill | CutMode::Image) {
+                ui.label("Overscan");
+                ui.add(crate::settings::num(&mut c.overscan_percent).range(0.0..=50.0).speed(0.1).suffix(" %")).on_hover_text("The head runs on past each end of a scan line with the laser off, so it burns at full speed (even edges). It's a percentage of the speed: 2.5% at 100 mm/s is 2.5 mm. It stays on the bed.");
+                ui.end_row();
+            }
+            if matches!(c.mode, CutMode::Line | CutMode::FillLine) {
+                ui.label("Kerf offset");
+                ui.add(u.len(&mut c.kerf, -5.0, 5.0, 0.005).max_decimals(if u == crate::settings::Units::Mm { 3 } else { 4 }))
+                    .on_hover_text("Moves cuts outward on outer edges and inward on holes, so parts come out at their drawn size. Use half the width of the cut line (measure a test cut). A negative value does the opposite, for inlays.");
+                ui.end_row();
+                ui.label("Tabs");
+                ui.checkbox(&mut c.tabs.on, "").on_hover_text("Leave short uncut places on each closed shape so parts stay in the sheet until you snap them out. Tabs you place by hand (Modify → Tabs) are always used.");
+                ui.end_row();
+                ui.label("Tab width");
+                ui.add(u.len(&mut c.tabs.width, 0.0, 20.0, 0.01)).on_hover_text("How long each tab is along the outline (also for tabs placed by hand)");
+                ui.end_row();
+                if c.tabs.on {
+                    ui.label("Tabs per shape");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut c.tabs.by_count, true, "Count");
+                        ui.selectable_value(&mut c.tabs.by_count, false, "Every");
+                        if c.tabs.by_count {
+                            ui.add(crate::settings::num(&mut c.tabs.count).range(1..=100));
+                        } else {
+                            ui.add(u.len(&mut c.tabs.spacing, 1.0, 10_000.0, 0.5));
+                        }
+                    });
+                    ui.end_row();
+                    ui.label("Skip holes");
+                    ui.checkbox(&mut c.tabs.skip_inner, "").on_hover_text("No tabs on shapes inside other shapes, so their scrap falls out");
+                    ui.end_row();
+                }
+            }
             ui.label("Air assist");
             ui.checkbox(&mut c.air_assist, "");
             ui.end_row();
@@ -381,7 +414,7 @@ fn properties(ui: &mut Ui, app: &mut App) {
     });
     ui.horizontal(|ui| {
         ui.label(RichText::new("X / Y point").size(11.5));
-        if anchor_picker(ui, &mut app.settings.anchor) {
+        if anchor_picker(ui, &mut app.settings.anchor, "X / Y set the {} of the selection") {
             let now = ui.input(|i| i.time);
             app.save_settings(now);
         }
@@ -868,6 +901,7 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
         let now = ui.input(|i| i.time);
         app.send_gcode(vec![format!("$J=G91 G21 X{dx:.3} Y{dy:.3} F3000")], now);
     }
+    job_start(ui, app);
     // Frame (nothing burns) kept apart from the controls that fire the laser
     ui.horizontal(|ui| {
         let a = Action::LaserFrame;
@@ -917,6 +951,65 @@ fn laser(ui: &mut Ui, app: &mut App, run: &mut Vec<Action>) {
             }
         }
     });
+}
+
+/// Start from: where Frame, Start and Save G-code put the job on the laser.
+fn job_start(ui: &mut Ui, app: &mut App) {
+    use crate::gcode::{Family, StartFrom};
+    let gcode_laser = app.settings.device.controller.family() == Family::GCode;
+    let mut js = app.settings.job_start;
+    ui.horizontal(|ui| {
+        ui.label("Start from");
+        ui.add_enabled_ui(gcode_laser, |ui| {
+            egui::ComboBox::from_id_salt("start_from").selected_text(js.from.label()).show_ui(ui, |ui| {
+                for f in StartFrom::ALL {
+                    ui.selectable_value(&mut js.from, f, f.label());
+                }
+            });
+        })
+        .response
+        .on_hover_text(
+            "Absolute coordinates: the job burns where it sits on the bed in BurnCraft.\nUser origin: the job's anchor point goes to a point you save.\nCurrent position: the job's anchor point goes where the head is now (a saved G-code file starts from wherever the head is when it runs).",
+        );
+    });
+    if !gcode_laser {
+        ui.label(RichText::new("This laser always burns at the design's position on the bed.").size(11.0));
+    } else if js.from != StartFrom::Absolute {
+        ui.horizontal(|ui| {
+            ui.label("Job anchor");
+            anchor_picker(ui, &mut js.anchor, "The job's {} goes to the start point");
+        });
+        if js.from == StartFrom::UserOrigin {
+            let u = app.settings.units;
+            ui.horizontal(|ui| {
+                ui.label("X");
+                ui.add(u.len(&mut js.user_origin.0, -10_000.0, 10_000.0, 0.1));
+                ui.label("Y");
+                ui.add(u.len(&mut js.user_origin.1, -10_000.0, 10_000.0, 0.1));
+                let homed = app.laser.connected && app.laser.homed && app.laser.origin.is_some();
+                let r = ui.add_enabled(homed, egui::Button::new("Here")).on_hover_text("Save the head's position as the user origin").on_disabled_hover_text("Connect and home the laser first, so BurnCraft knows where the head is on the bed");
+                if r.clicked() {
+                    let o = app.laser.origin.unwrap_or((0.0, 0.0));
+                    let pos = app.laser.pos;
+                    js.user_origin = if app.laser.machine_pos { pos } else { (pos.0 + o.0, pos.1 + o.1) };
+                }
+            });
+        }
+        if js.from == StartFrom::CurrentPosition && !(app.laser.homed && app.laser.origin.is_some()) {
+            ui.label(RichText::new("Not homed: BurnCraft can only check that the job is no bigger than the bed. Frame it first.").size(11.0).color(Color32::from_rgb(220, 140, 40)));
+        }
+    }
+    // saved once a drag or typing has finished, not on every frame of it
+    let dirty_id = egui::Id::unique("job_start_unsaved");
+    if js != app.settings.job_start {
+        app.settings.job_start = js;
+        app.job = None;
+        ui.data_mut(|d| d.insert_temp(dirty_id, true));
+    }
+    if ui.data(|d| d.get_temp::<bool>(dirty_id).unwrap_or(false)) && !ui.input(|i| i.pointer.any_down()) && !ui.ctx().egui_wants_keyboard_input() {
+        ui.data_mut(|d| d.insert_temp(dirty_id, false));
+        app.save_settings(ui.input(|i| i.time));
+    }
 }
 
 pub fn bottom_bar(ui: &mut Ui, app: &mut App) {
@@ -1129,8 +1222,9 @@ fn long_len(u: crate::settings::Units, mm: f64) -> String {
     }
 }
 
-/// A small 3 × 3 grid of dots: which point of the selection's box X / Y refer to. True when changed.
-fn anchor_picker(ui: &mut Ui, anchor: &mut [u8; 2]) -> bool {
+/// A small 3 × 3 grid of dots to choose a point of a box. `what` says what it's for, with `{}` for the
+/// point's name. True when changed.
+fn anchor_picker(ui: &mut Ui, anchor: &mut [u8; 2], what: &str) -> bool {
     let size = 13.0;
     let (rect, resp) = ui.allocate_exact_size(vec2(size * 3.0, size * 3.0), Sense::click());
     let col = theme::colors(ui.visuals().dark_mode);
@@ -1149,6 +1243,6 @@ fn anchor_picker(ui: &mut Ui, anchor: &mut [u8; 2]) -> bool {
         }
     }
     let names = [["bottom-left", "left middle", "top-left"], ["bottom middle", "centre", "top middle"], ["bottom-right", "right middle", "top-right"]];
-    resp.on_hover_text(format!("X / Y set the {} of the selection. Click a dot to change.", names[anchor[0] as usize][anchor[1] as usize]));
+    resp.on_hover_text(format!("{}. Click a dot to change.", what.replace("{}", names[anchor[0] as usize][anchor[1] as usize])));
     changed
 }

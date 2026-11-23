@@ -14,7 +14,7 @@ pub enum Icon {
     Connect, Home, Frame, Start, Pause, Stop,
     Search, Keyboard, Settings, Notes, Exit, Layers, Laser, Image,
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
-    Pen, Arc, Star, Trim, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
+    Pen, Arc, Star, Trim, Tabs, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
     Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary, Nest, PlayPreview,
 }
@@ -548,6 +548,12 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             line(&[(0.66, 0.5), (0.92, 0.5)], st);
             line(&[(0.38, 0.15), (0.38, 0.85)], thin);
             line(&[(0.66, 0.15), (0.66, 0.85)], thin);
+        }
+        Icon::Tabs => {
+            // a square cut with two gaps, and a tab marker in one
+            line(&[(0.3, 0.15), (0.85, 0.15), (0.85, 0.85), (0.15, 0.85), (0.15, 0.62)], st);
+            line(&[(0.15, 0.38), (0.15, 0.15), (0.12, 0.15)], st);
+            line(&[(0.05, 0.5), (0.25, 0.5)], ac);
         }
         Icon::Fillet => {
             line(&[(0.15, 0.88), (0.15, 0.45)], st);

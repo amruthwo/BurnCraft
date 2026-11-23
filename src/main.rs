@@ -47,6 +47,7 @@ mod wand;
 mod ai;
 mod text;
 mod theme;
+mod toolpath;
 mod tour;
 mod svg;
 mod update;
@@ -108,6 +109,7 @@ impl Root {
                     "star" => Some(app::Tool::Star),
                     "fillet" => Some(app::Tool::Fillet),
                     "arc" => Some(app::Tool::Arc),
+                    "tabs" => Some(app::Tool::Tabs),
                     _ => None,
                 };
                 if let Some(tool) = tool {
@@ -130,6 +132,19 @@ impl Root {
                     app.sel = vec![2];
                 }
                 "camera" => app.win_camera = true,
+                // the Laser panel with Start from set to a user origin
+                "jobstart" => {
+                    app.side_tab = app::SideTab::Laser;
+                    app.settings.job_start = gcode::JobStart { from: gcode::StartFrom::UserOrigin, anchor: [1, 1], user_origin: (120.0, 80.0) };
+                }
+                // a cut layer's kerf and tabs settings, with tabs placed by hand and the job previewed
+                "tabs" => {
+                    let c = app.doc.cut_mut(app.current_layer);
+                    c.mode = model::CutMode::Line;
+                    c.kerf = 0.08;
+                    c.tabs = model::Tabs { on: true, ..Default::default() };
+                    app.preview_on = true;
+                }
                 "rotary" => {
                     app.win_rotary = true;
                     app.settings.device.rotary.enabled = true;
