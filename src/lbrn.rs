@@ -69,6 +69,7 @@ pub fn load_str(src: &str) -> Result<Loaded, String> {
     if let Some(v) = root.attr("BcVarText").and_then(|t| serde_json::from_str(t).ok()) {
         doc.vartext = v;
     }
+    doc.from_lbrn = true;
     Ok(Loaded { doc, warnings, kept })
 }
 
@@ -465,7 +466,8 @@ fn shape_node(s: &Shape) -> Node {
         }
         _ => {}
     }
-    for (k, v) in &s.extra_attrs {
+    // (fields kept from a newer .burn file don't belong in a LightBurn file)
+    for (k, v) in s.extra_attrs.iter().filter(|(k, _)| !k.starts_with(crate::burn::KEEP)) {
         n.set(k, v.clone());
     }
     n.push(Node::new("XForm").with_text(s.xform.to_lbrn()));
@@ -536,7 +538,7 @@ pub fn cut_node(c: &CutSetting) -> Node {
     if c.frequency != CutSetting::DEFAULT_FREQUENCY {
         v("frequency", fmt_num(c.frequency));
     }
-    for (k, val) in &c.extra {
+    for (k, val) in c.extra.iter().filter(|(k, _)| !k.starts_with(crate::burn::KEEP)) {
         v(k, val.clone());
     }
     n
@@ -549,7 +551,7 @@ pub fn save_string(doc: &Document, kept: &[Node]) -> String {
         .set("MaterialHeight", fmt_num(doc.material_height))
         .set("MirrorX", if doc.mirror_x { "True" } else { "False" })
         .set("MirrorY", if doc.mirror_y { "True" } else { "False" });
-    for (k, v) in &doc.extra_root {
+    for (k, v) in doc.extra_root.iter().filter(|(k, _)| !k.starts_with(crate::burn::KEEP)) {
         root.set(k, v.clone());
     }
     for (k, v) in crate::relations::to_file(doc) {

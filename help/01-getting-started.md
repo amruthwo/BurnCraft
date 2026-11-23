@@ -1,6 +1,6 @@
 # Getting started
 
-BurnCraft designs, traces and burns laser jobs, and opens LightBurn projects (.lbrn2 and .lbrn).
+BurnCraft designs, traces and burns laser jobs. It saves its own projects as **.burn** files, and opens and saves LightBurn projects (.lbrn2, and opens older .lbrn).
 
 ## The window
 

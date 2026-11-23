@@ -14,8 +14,8 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
     use Action::*;
     match tab {
         RibbonTab::Home => vec![
-            ("Project", vec![New, Open, Save, SaveAs, Import]),
-            ("Clipboard", vec![Paste, Copy, Cut, Duplicate, Delete]),
+            ("Project", vec![New, Open, Save, SaveAs, Import, Export]),
+            ("Clipboard", vec![Paste, Copy, Cut, CopyPicture, Duplicate, Delete]),
             ("Draw", vec![ToolSelect, ToolLine, ToolRect, ToolEllipse, ToolText]),
             ("Arrange", vec![Group, Ungroup, PageCenter]),
             ("Preview", vec![Preview, PreviewPlay, LaserFrame]),

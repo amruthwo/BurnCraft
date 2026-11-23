@@ -27,7 +27,99 @@ pub fn all(ctx: &Context, app: &mut App, run: &mut Vec<Action>) {
     rotary(ctx, app);
     nest(ctx, app);
     recover(ctx, app);
+    export(ctx, app);
+    pdf_page(ctx, app);
     toasts(ctx, app);
+}
+
+/// Export: the format, what to include, and the page or resolution.
+fn export(ctx: &Context, app: &mut App) {
+    use crate::export::Format;
+    if !app.win_export {
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let mut open = true;
+    let mut go = false;
+    let has_sel = !app.sel.is_empty();
+    egui::Window::new("Export").open(&mut open).collapsible(false).vscroll(true).max_height(fit_h(ctx)).max_width(fit_w(ctx)).default_width(420.0).show(ctx, |ui| {
+        let o = &mut app.export_opts;
+        if !has_sel {
+            o.selection = false;
+        }
+        ui.horizontal_wrapped(|ui| {
+            for f in Format::ALL {
+                ui.selectable_value(&mut o.format, f, RichText::new(f.label()).strong());
+            }
+        });
+        ui.label(RichText::new(o.format.hint()).size(11.5).weak());
+        ui.add_space(6.0);
+        if o.format != Format::Gcode {
+            egui::Grid::new("export").num_columns(2).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+                ui.label("Export");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut o.selection, false, "The whole design");
+                    ui.add_enabled_ui(has_sel, |ui| ui.selectable_value(&mut o.selection, true, "Only the selection")).response.on_disabled_hover_text("Select some shapes first");
+                });
+                ui.end_row();
+                ui.label("");
+                ui.checkbox(&mut o.everything, "Include layers that don't burn, and construction lines");
+                ui.end_row();
+                if o.format != Format::Dxf {
+                    ui.label("Page");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut o.fit, false, "Work area").on_hover_text("The page is the laser's work area: shapes keep their place on it");
+                        ui.selectable_value(&mut o.fit, true, "Fit the design").on_hover_text("The page is just big enough for the shapes");
+                    });
+                    ui.end_row();
+                }
+                if o.format == Format::Png {
+                    ui.label("Resolution");
+                    ui.add(crate::settings::num(&mut o.dpi).range(25.0..=1200.0).speed(5.0).suffix(" DPI"));
+                    ui.end_row();
+                    ui.label("Background");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut o.white, true, "White");
+                        ui.selectable_value(&mut o.white, false, "See-through");
+                    });
+                    ui.end_row();
+                }
+            });
+        }
+        ui.add_space(6.0);
+        go = ui.add(egui::Button::new(RichText::new(format!("Export {}…", o.format.label())).strong()).fill(ACCENT.gamma_multiply(0.8))).clicked();
+    });
+    if go {
+        app.export_now(ctx, now);
+    }
+    if !open {
+        app.win_export = false;
+    }
+}
+
+/// A PDF with several pages: which one to import.
+fn pdf_page(ctx: &Context, app: &mut App) {
+    let Some((name, _, pages, chosen)) = app.pdf_pending.as_mut() else { return };
+    let now = ctx.input(|i| i.time);
+    let mut open = true;
+    let mut go = false;
+    let file = std::path::Path::new(name.as_str()).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    egui::Window::new("Import PDF").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
+        ui.label(format!("\u{201c}{file}\u{201d} has {pages} pages. Which one?"));
+        ui.horizontal(|ui| {
+            ui.label("Page");
+            ui.add(crate::settings::num(chosen).range(1..=*pages));
+            ui.label(format!("of {pages}"));
+        });
+        go = ui.button(RichText::new("Import").strong()).clicked();
+    });
+    if go {
+        if let Some((_, bytes, _, page)) = app.pdf_pending.take() {
+            app.import_pdf_page(&bytes, page, now);
+        }
+    } else if !open {
+        app.pdf_pending = None;
+    }
 }
 
 /// Projects autosave kept from a session that didn't close normally: Recover or Discard each.

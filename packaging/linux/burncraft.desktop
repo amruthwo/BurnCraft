@@ -8,5 +8,5 @@ Icon=org.burncraft.BurnCraft
 Terminal=false
 Categories=Graphics;2DGraphics;VectorGraphics;Engineering;
 Keywords=laser;engraver;cnc;grbl;lightburn;gcode;
-MimeType=application/x-lightburn;image/png;image/jpeg;
+MimeType=application/x-burncraft-project;application/x-lightburn;image/svg+xml;image/vnd.dxf;image/png;image/jpeg;
 StartupWMClass=org.burncraft.BurnCraft

@@ -18,6 +18,10 @@ pub struct Imported {
     pub images: Vec<(BitmapData, f64, f64, Xform)>,
     /// Text that wasn't converted to outlines (it can't be read without fonts).
     pub skipped_text: usize,
+    /// Outlines that say which BurnCraft layer they belong on (a DXF layer named C00…C29, T1, T2).
+    pub on_layers: Vec<(PathData, usize)>,
+    /// Other things left out or assumed, to tell the user (one line each).
+    pub notes: Vec<String>,
 }
 
 /// Read an SVG document. `page_top` is where the page's top edge goes, in mm (the bed's height on import).
@@ -38,7 +42,7 @@ pub fn import(data: &[u8], page_top: f64) -> Result<Imported, String> {
     // text is left out (it needs fonts to become outlines): count it in the file to say so
     let src = String::from_utf8_lossy(data);
     let skipped_text = src.match_indices("<text").filter(|(i, _)| src[i + 5..].starts_with(|c: char| c == '>' || c.is_whitespace())).count();
-    let mut out = Imported { paths: Vec::new(), images: Vec::new(), skipped_text };
+    let mut out = Imported { paths: Vec::new(), images: Vec::new(), skipped_text, on_layers: Vec::new(), notes: Vec::new() };
     let world = |t: &usvg::Transform, x: f32, y: f32| -> P2 {
         let px = t.sx as f64 * x as f64 + t.kx as f64 * y as f64 + t.tx as f64;
         let py = t.ky as f64 * x as f64 + t.sy as f64 * y as f64 + t.ty as f64;
@@ -208,7 +212,8 @@ fn hex(layer: usize) -> String {
 }
 
 fn write_shape(out: &mut String, s: &Shape, parent: Xform, to: &dyn Fn(P2) -> P2) {
-    let x = s.xform.then_after(parent);
+    // the shape's own placement first, then its group's (as Shape::world_outline does)
+    let x = parent.then_after(s.xform);
     match &s.kind {
         ShapeKind::Group(children) => {
             for c in children {

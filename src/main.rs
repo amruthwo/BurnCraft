@@ -8,9 +8,12 @@ mod app;
 mod autosave;
 mod barcode;
 mod camera;
+mod burn;
 mod canvas;
 mod dialogs;
 mod dims;
+mod dxf;
+mod export;
 mod ezd;
 mod fonts;
 mod galvo;
@@ -29,7 +32,9 @@ mod nodes;
 mod model;
 mod ops;
 mod panels;
+mod pdf;
 mod platform;
+mod raster;
 mod relations;
 mod ruida;
 mod ribbon;
@@ -45,6 +50,7 @@ mod theme;
 mod tour;
 mod svg;
 mod update;
+mod vecio;
 mod vartext;
 mod xml;
 
@@ -129,6 +135,7 @@ impl Root {
                     app.settings.device.rotary.enabled = true;
                 }
                 "settings" => app.win_settings = true,
+                "export" => app.win_export = true,
                 "recover" => {
                     // sample entries only (nothing is read from or written to the data folder)
                     let t = autosave::wall_secs();

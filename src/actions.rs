@@ -24,14 +24,16 @@ macro_rules! actions {
 
 actions! {
     New: "New", New, "File", "Start a new, empty project", ["Ctrl+N"], ["Ctrl+N"];
-    Open: "Open", Open, "File", "Open a BurnCraft or LightBurn project (.lbrn2, .lbrn)", ["Ctrl+O"], ["Ctrl+O"];
-    Import: "Import", Import, "File", "Bring in an image (PNG, JPG, BMP...) or another project", ["Ctrl+I"], ["Ctrl+I"];
-    Save: "Save", Save, "File", "Save the project (LightBurn-compatible .lbrn2)", ["Ctrl+S"], ["Ctrl+S"];
-    SaveAs: "Save As", SaveAs, "File", "Save the project under a new name", ["Ctrl+Shift+S"], ["Ctrl+Shift+S"];
+    Open: "Open", Open, "File", "Open a project (BurnCraft .burn, LightBurn .lbrn2 / .lbrn), or a drawing (SVG, DXF, PDF)", ["Ctrl+O"], ["Ctrl+O"];
+    Import: "Import", Import, "File", "Add a drawing (SVG, DXF, PDF), a picture (PNG, JPG, BMP…), an EZCad2 file or another project to this one", ["Ctrl+I"], ["Ctrl+I"];
+    Export: "Export", Export, "File", "Save the design or the selection as SVG, DXF, PDF, PNG or G-code", ["Ctrl+Shift+E"], ["Ctrl+Shift+E"];
+    Save: "Save", Save, "File", "Save the project: new projects as BurnCraft .burn (keeps everything), LightBurn projects as .lbrn2", ["Ctrl+S"], ["Ctrl+S"];
+    SaveAs: "Save As", SaveAs, "File", "Save the project under a new name, as BurnCraft .burn or LightBurn .lbrn2", ["Ctrl+Shift+S"], ["Ctrl+Shift+S"];
     ExportGcode: "Save G-code", Export, "File", "Write the laser job as a G-code file", ["Alt+X"], ["Alt+X"];
     Undo: "Undo", Undo, "Edit", "Undo the last change", ["Ctrl+Z"], ["Ctrl+Z"];
     Redo: "Redo", Redo, "Edit", "Redo what you undid", ["Ctrl+Shift+Z"], ["Ctrl+Y", "Ctrl+Shift+Z"];
     Copy: "Copy", Copy, "Edit", "Copy the selection", ["Ctrl+C"], ["Ctrl+C"];
+    CopyPicture: "Copy as Picture", Copy, "Edit", "Copy the selection as a picture, to paste into documents and chats (pasting it back into BurnCraft gives the shapes)", ["Ctrl+Alt+C"], ["Ctrl+Alt+C"];
     Cut: "Cut", Cut, "Edit", "Cut the selection", ["Ctrl+X"], ["Ctrl+X"];
     Paste: "Paste", Paste, "Edit", "Paste (offset a little)", ["Ctrl+V"], ["Ctrl+V"];
     PasteInPlace: "Paste in Place", Paste, "Edit", "Paste exactly where it was copied", ["Alt+V"], ["Ctrl+Shift+V"];

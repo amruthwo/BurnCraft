@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- BurnCraft's own project files (.burn): a zip holding burncraft.json, the pictures and a thumbnail.
+     Installed to /usr/share/mime/packages/ (the packages run update-mime-database through their triggers). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-burncraft-project">
+    <comment>BurnCraft project</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.burn" weight="60"/>
+    <icon name="org.burncraft.BurnCraft"/>
+    <generic-icon name="application-x-generic"/>
+  </mime-type>
+</mime-info>

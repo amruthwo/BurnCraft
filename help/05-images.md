@@ -2,10 +2,13 @@
 
 ## Bringing images in
 
-- **Import** (Ctrl+I) adds SVG drawings, PNG, JPG, BMP, GIF, WebP or TIFF pictures, or another project. You can also drop files on the window.
+- **Import** (Ctrl+I) adds SVG, DXF or PDF drawings, PNG, JPG, BMP, GIF, WebP or TIFF pictures, EZCad2 files, or another project. You can also drop files on the window, or copy files in your file manager and paste them (Ctrl+V).
 - **SVG**: sizes and units are kept (an SVG made 50 mm wide comes in 50 mm wide), and so are curves, rotations and pictures inside it. Each colour goes on the layer with the nearest colour. The SVG's page sits at the bed's top-left corner; if the drawing would land off the bed, it's put in the middle. Text in an SVG is left out (BurnCraft says so): convert text to paths in your drawing program (Inkscape: Path → Object to Path) before saving. Pictures must be embedded in the SVG: pictures that are only linked to as separate files are skipped, so that an SVG from elsewhere can never pull files from your computer into a design (in Inkscape, Extensions → Images → Embed Images).
+- **DXF** (from CAD programs): lines, polylines with arcs, arcs, circles, ellipses, splines and blocks come in at their real size, using the units the drawing says (or millimetres if it doesn't say, and BurnCraft tells you). Pieces whose ends meet are joined into closed shapes. Each colour goes on the nearest layer; a DXF layer named like a BurnCraft layer (C00–C29) goes back on that layer. Text and dimensions are left out (explode them into lines first), and drawings or pictures in other files are never read. Binary DXF isn't supported: save as text (ASCII) DXF.
+- **PDF**: the drawing on one page (BurnCraft asks which page if there are several), with its curves, colours and pictures. Text is left out: convert it to outlines (curves) first. A page that is only a picture (a scan) comes in as a picture: trace it to get outlines.
+- **DWG** files can't be opened: save the drawing as DXF in your CAD program.
 - **Paste**: a picture copied in a browser or another app pastes straight in (Ctrl+V), centred on the mouse. Pasted SVG becomes shapes the same way, and pasted text becomes a Text shape.
-- **Copy** puts the selected shapes on the clipboard as SVG too, in their layer colours and real size, so programs that accept pasted SVG text can use them.
+- **Copy** puts the selected shapes on the clipboard as SVG too, in their layer colours and real size, so programs that accept pasted SVG text can use them. **Copy as Picture** (Ctrl+Alt+C) copies the selection as a picture instead, for documents and chats; pasting that picture back into BurnCraft gives the shapes again.
 - Images go on an Image layer. Adjust brightness, contrast and gamma in the Image tab, and invert.
 
 ## Tracing

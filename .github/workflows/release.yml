@@ -142,9 +142,25 @@ jobs:
             <key>LSApplicationCategoryType</key><string>public.app-category.graphics-design</string>
             <key>NSHighResolutionCapable</key><true/>
             <key>CFBundleDocumentTypes</key><array><dict>
+              <key>CFBundleTypeName</key><string>BurnCraft project</string>
+              <key>LSItemContentTypes</key><array><string>org.burncraft.project</string></array>
+              <key>CFBundleTypeIconFile</key><string>burncraft.icns</string>
+              <key>CFBundleTypeRole</key><string>Editor</string>
+              <key>LSHandlerRank</key><string>Owner</string>
+            </dict><dict>
               <key>CFBundleTypeName</key><string>LightBurn project</string>
               <key>CFBundleTypeExtensions</key><array><string>lbrn2</string><string>lbrn</string></array>
               <key>CFBundleTypeRole</key><string>Editor</string>
+            </dict></array>
+            <key>UTExportedTypeDeclarations</key><array><dict>
+              <key>UTTypeIdentifier</key><string>org.burncraft.project</string>
+              <key>UTTypeDescription</key><string>BurnCraft project</string>
+              <key>UTTypeIconFile</key><string>burncraft.icns</string>
+              <key>UTTypeConformsTo</key><array><string>public.data</string><string>public.zip-archive</string></array>
+              <key>UTTypeTagSpecification</key><dict>
+                <key>public.filename-extension</key><array><string>burn</string></array>
+                <key>public.mime-type</key><string>application/x-burncraft-project</string>
+              </dict>
             </dict></array>
           </dict></plist>
           EOF

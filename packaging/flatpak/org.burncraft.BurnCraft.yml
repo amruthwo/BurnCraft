@@ -32,6 +32,7 @@ modules:
       - install -Dm755 target/release/burncraft /app/bin/burncraft
       - install -Dm644 packaging/linux/burncraft.desktop /app/share/applications/org.burncraft.BurnCraft.desktop
       - install -Dm644 packaging/linux/org.burncraft.BurnCraft.metainfo.xml /app/share/metainfo/org.burncraft.BurnCraft.metainfo.xml
+      - install -Dm644 packaging/linux/org.burncraft.BurnCraft.mime.xml /app/share/mime/packages/org.burncraft.BurnCraft.xml
       - install -Dm644 packaging/icons/burncraft.svg /app/share/icons/hicolor/scalable/apps/org.burncraft.BurnCraft.svg
       - install -Dm644 packaging/icons/burncraft-256.png /app/share/icons/hicolor/256x256/apps/org.burncraft.BurnCraft.png
     sources:

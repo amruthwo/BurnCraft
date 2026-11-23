@@ -144,11 +144,23 @@ pub fn png_bytes(w: u32, h: u32, rgba: Vec<u8>) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// A picture on the system clipboard (copied from a browser, screenshot tool...), as PNG bytes.
+/// The picture on the clipboard as raw pixels (width, height, RGBA), to recognise BurnCraft's own.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn clipboard_image() -> Option<Vec<u8>> {
+pub fn clipboard_image_raw() -> Option<(usize, usize, Vec<u8>)> {
     let img = with_clipboard(|cb| cb.get_image().ok())?;
-    png_bytes(img.width as u32, img.height as u32, img.bytes.into_owned())
+    Some((img.width, img.height, img.bytes.into_owned()))
+}
+
+/// Put a picture (RGBA pixels) on the system clipboard.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn clipboard_set_image(w: usize, h: usize, rgba: Vec<u8>) -> bool {
+    with_clipboard(|cb| cb.set_image(arboard::ImageData { width: w, height: h, bytes: std::borrow::Cow::Owned(rgba) }).ok()).is_some()
+}
+
+/// Files copied in the file manager (only what the user copied; nothing else is looked at).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn clipboard_files() -> Vec<std::path::PathBuf> {
+    with_clipboard(|cb| cb.get().file_list().ok()).unwrap_or_default()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -162,13 +174,23 @@ pub fn clipboard_set_text(t: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn clipboard_image() -> Option<Vec<u8>> {
+pub fn clipboard_text() -> Option<String> {
     None
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn clipboard_text() -> Option<String> {
+pub fn clipboard_image_raw() -> Option<(usize, usize, Vec<u8>)> {
     None
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn clipboard_set_image(_w: usize, _h: usize, _rgba: Vec<u8>) -> bool {
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn clipboard_files() -> Vec<std::path::PathBuf> {
+    Vec::new()
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -73,9 +73,23 @@ Settings → **About BurnCraft** shows the version, how this copy was installed 
 
 ## Files
 
-- BurnCraft saves LightBurn-compatible **.lbrn2** projects, and opens .lbrn2 and older .lbrn files.
-- Sketch relations, editable offsets and arrays are stored as extra attributes that LightBurn ignores.
+- **BurnCraft projects (.burn)** keep everything: shapes, layers and their settings, relations, editable offsets and arrays, variable text and notes. Pictures are kept inside as real PNG or JPEG files (exactly as they came in), with a small preview picture. Fonts aren't put in the file, only their names. New projects save as .burn.
+- **LightBurn projects (.lbrn2)**: BurnCraft opens .lbrn2 and older .lbrn files, and a project opened from one keeps saving as .lbrn2. To change, use **Save As** and choose BurnCraft project (.burn). Sketch relations, editable offsets and arrays go in .lbrn2 files as extra details that LightBurn ignores.
+- **Save As** offers both. If a .burn made by a newer BurnCraft has details this version doesn't know, they're kept when you save it as .burn, and BurnCraft tells you when a .lbrn2 can't hold them.
+- **Open**, **Import** (adds a project's shapes and layers to the open one) and dropping files on the window take .burn too.
 - Settings and your layer defaults are kept in your user settings folder (%APPDATA%\BurnCraft on Windows).
+
+## Export
+
+**Export** (Home → Project, Ctrl+Shift+E) saves the design, or just the selection, as:
+
+- **SVG**: for drawing programs and other laser software. Real size, curves, layer colours and pictures.
+- **DXF**: for CAD programs. Millimetres, each layer as a DXF layer in its colour, curves as fine lines. Pictures can't go in a DXF.
+- **PDF**: vector, at real size, with curves, colours and pictures.
+- **PNG**: a picture at the resolution you choose (300 DPI to start with), on white or see-through.
+- **G-code**: the laser job (the same as Laser → Save G-code).
+
+Layers that don't burn and construction lines are left out unless you tick **Include layers that don't burn**. For SVG, PDF and PNG, the page is the work area (shapes keep their place) or just fits the design. In the browser, the file downloads.
 
 ## Autosave and recovering unsaved work
 

@@ -679,6 +679,9 @@ pub struct Document {
     pub title: Option<String>,
     /// Rows, serial number and settings for variable text (saved as the root attribute `BcVarText`).
     pub vartext: crate::vartext::VarText,
+    /// Read from a LightBurn project (.lbrn2 / .lbrn): it keeps saving as .lbrn2 unless Save As chooses .burn.
+    /// Not saved in files.
+    pub from_lbrn: bool,
 }
 
 impl Default for Document {
@@ -698,6 +701,7 @@ impl Default for Document {
             arrays: Vec::new(),
             title: None,
             vartext: Default::default(),
+            from_lbrn: false,
         }
     }
 }

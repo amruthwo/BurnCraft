@@ -393,6 +393,13 @@ pub struct App {
     autosave_rev: u64,
     /// The Recover window (projects from a session that didn't close normally).
     pub win_recover: bool,
+    /// The Export window and its choices.
+    pub win_export: bool,
+    pub export_opts: crate::export::Options,
+    /// A PDF with several pages, waiting for the page to import: (file name, bytes, pages, chosen page).
+    pub pdf_pending: Option<(String, Vec<u8>, usize, usize)>,
+    /// Fingerprint of the picture Copy as Picture put on the clipboard (pasting it back gives the shapes).
+    clip_picture: Option<u64>,
     autosave_warned: bool,
 }
 
@@ -528,6 +535,10 @@ impl App {
             next_tab_id: 2,
             autosave_rev: 0,
             win_recover: false,
+            win_export: false,
+            export_opts: Default::default(),
+            pdf_pending: None,
+            clip_picture: None,
             autosave_warned: false,
             nest_job: None,
             nest_result: None,
@@ -680,7 +691,7 @@ impl App {
     pub fn enabled(&self, a: Action) -> bool {
         let has_sel = !self.sel.is_empty();
         match a {
-            Action::Copy | Action::Cut | Action::Duplicate | Action::Delete | Action::FlipH | Action::FlipV | Action::RotateCW | Action::RotateCCW | Action::PageCenter | Action::PushFront | Action::PushBack | Action::ZoomSelection | Action::GridArray | Action::ConvertToPath | Action::Offset | Action::BreakApart => has_sel,
+            Action::Copy | Action::CopyPicture | Action::Cut | Action::Duplicate | Action::Delete | Action::FlipH | Action::FlipV | Action::RotateCW | Action::RotateCCW | Action::PageCenter | Action::PushFront | Action::PushBack | Action::ZoomSelection | Action::GridArray | Action::ConvertToPath | Action::Offset | Action::BreakApart => has_sel,
             Action::Group | Action::Weld | Action::BoolUnion | Action::BoolSubtract | Action::BoolIntersect | Action::AlignLeft | Action::AlignRight | Action::AlignTop | Action::AlignBottom | Action::AlignHCenter | Action::AlignVCenter => self.sel.len() >= 2,
             Action::DistributeH | Action::DistributeV => self.sel.len() >= 3,
             Action::Ungroup => self.sel.iter().any(|i| matches!(self.doc.shapes.get(*i).map(|s| &s.kind), Some(ShapeKind::Group(_)))),
@@ -1019,7 +1030,7 @@ impl App {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = (label, exts);
-            let mime = if name.ends_with(".lbrn2") { "application/xml" } else { "application/octet-stream" };
+            let mime = if name.ends_with(".lbrn2") { "application/xml" } else if name.ends_with(".burn") { crate::burn::MIME } else { "application/octet-stream" };
             crate::platform::download(name, bytes, mime).map(|_| None).map_err(Some)
         }
     }
@@ -1128,7 +1139,9 @@ impl App {
             self.import_bytes(name, bytes, now);
             return;
         }
-        match crate::lbrn::load_str(&String::from_utf8_lossy(&bytes)) {
+        // BurnCraft's own .burn (a zip), or a LightBurn project (XML)
+        let loaded = if crate::burn::looks_like(&bytes) { crate::burn::load(&bytes).map(|l| crate::lbrn::Loaded { doc: l.doc, warnings: l.warnings, kept: l.kept }) } else { crate::lbrn::load_str(&String::from_utf8_lossy(&bytes)) };
+        match loaded {
             Ok(l) => {
                 if !self.doc.shapes.is_empty() || self.dirty || self.path.is_some() {
                     self.new_tab(None);
@@ -1161,6 +1174,28 @@ impl App {
         let ext = std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
         if ext == "svg" {
             self.add_svg(&bytes, None, "Imported", now);
+            return;
+        }
+        if ext == "dxf" {
+            match crate::dxf::import(&bytes) {
+                Ok(imp) => self.add_imported(imp, None, "Imported DXF", now),
+                Err(e) => self.error(e, now),
+            }
+            return;
+        }
+        if ext == "pdf" {
+            match crate::pdf::page_count(&bytes) {
+                Ok(n) if n > 1 => {
+                    // several pages: ask which one
+                    self.pdf_pending = Some((name.to_string(), bytes, n, 1));
+                }
+                Ok(_) => self.import_pdf_page(&bytes, 1, now),
+                Err(e) => self.error(e, now),
+            }
+            return;
+        }
+        if ext == "dwg" {
+            self.error("DWG drawings can't be opened. In your CAD program, save the drawing as DXF (File → Save As → DXF), then import that.", now);
             return;
         }
         if ext == "ezd" {
@@ -1204,9 +1239,10 @@ impl App {
             }
             return;
         }
-        if ext == "lbrn2" || ext == "lbrn" {
-            // merge another project
-            match crate::lbrn::load_str(&String::from_utf8_lossy(&bytes)) {
+        if ext == "lbrn2" || ext == "lbrn" || ext == "burn" {
+            // merge another project (LightBurn's, or BurnCraft's own .burn)
+            let loaded = if crate::burn::looks_like(&bytes) { crate::burn::load(&bytes).map(|l| crate::lbrn::Loaded { doc: l.doc, warnings: l.warnings, kept: l.kept }) } else { crate::lbrn::load_str(&String::from_utf8_lossy(&bytes)) };
+            match loaded {
                 Ok(l) => {
                     self.checkpoint();
                     let start = self.doc.shapes.len();
@@ -1267,22 +1303,104 @@ impl App {
         self.current_layer
     }
 
+    /// Does this project save as a LightBurn file (it was opened from one) rather than BurnCraft's own .burn?
+    pub fn saves_as_lbrn(&self) -> bool {
+        match self.path.as_ref().and_then(|p| p.extension()).map(|e| e.to_string_lossy().to_ascii_lowercase()) {
+            Some(e) if e == "burn" => false,
+            Some(e) if e == "lbrn2" || e == "lbrn" => true,
+            _ => self.doc.from_lbrn,
+        }
+    }
+
+    /// The project's file contents in a format: BurnCraft's own .burn, or a LightBurn .lbrn2.
+    pub fn project_bytes(&mut self, burn: bool) -> Result<Vec<u8>, String> {
+        self.doc.sync_cuts();
+        if burn {
+            crate::burn::save(&self.doc, &self.kept)
+        } else {
+            Ok(crate::lbrn::save_string(&self.doc, &self.kept).into_bytes())
+        }
+    }
+
+    /// After saving as .lbrn2: say what couldn't go in it, or (once) that .burn keeps everything.
+    fn after_lbrn_save(&mut self, now: f64) {
+        let n = crate::burn::newer_fields(&self.doc);
+        if n > 0 {
+            self.error(format!("{n} detail(s) from a newer BurnCraft can't go in a .lbrn2 file and weren't saved there. Save As BurnCraft project (.burn) to keep them."), now);
+        } else if !self.settings.burn_hint_shown {
+            self.settings.burn_hint_shown = true;
+            self.save_settings(now);
+            self.toast("Saved as a LightBurn project. Tip: Save As BurnCraft project (.burn) keeps everything, with pictures as real files.", now);
+        }
+    }
+
+    /// Save to `p`; the extension says the format (.burn, or .lbrn2; none: BurnCraft's .burn).
     pub fn save_to(&mut self, p: PathBuf, now: f64) {
         let mut p = p;
         if p.extension().is_none() {
+            p.set_extension(if self.saves_as_lbrn() { "lbrn2" } else { "burn" });
+        }
+        let burn = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("burn"));
+        if !burn && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("lbrn")) {
+            // BurnCraft writes the newer LightBurn format
             p.set_extension("lbrn2");
         }
-        self.doc.sync_cuts();
-        let text = crate::lbrn::save_string(&self.doc, &self.kept);
-        match std::fs::write(&p, text) {
+        let bytes = match self.project_bytes(burn) {
+            Ok(b) => b,
+            Err(e) => {
+                self.error(format!("Could not save: {e}"), now);
+                return;
+            }
+        };
+        match std::fs::write(&p, bytes) {
             Ok(_) => {
                 self.settings.add_recent(&p.to_string_lossy());
                 self.save_settings(now);
                 self.path = Some(p);
                 self.dirty = false;
+                self.doc.from_lbrn = !burn;
                 self.toast("Saved", now);
+                if !burn {
+                    self.after_lbrn_save(now);
+                }
             }
             Err(e) => self.error(format!("Could not save: {e}"), now),
+        }
+    }
+
+    /// Save As: BurnCraft's own .burn, or a LightBurn .lbrn2 (offered first for projects that came from one).
+    pub fn save_as(&mut self, now: f64) {
+        let lbrn_first = self.saves_as_lbrn();
+        let stem = self.doc.title.clone().or_else(|| self.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().to_string())).unwrap_or_else(|| "project".into());
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (burn_f, lbrn_f) = (("BurnCraft project (keeps everything)", ["burn"]), ("LightBurn project", ["lbrn2"]));
+            let (first, second) = if lbrn_first { (lbrn_f, burn_f) } else { (burn_f, lbrn_f) };
+            let name = format!("{stem}.{}", first.1[0]);
+            let Some(p) = crate::platform::FileDialog::new().add_filter(first.0, &first.1).add_filter(second.0, &second.1).set_file_name(&name).save_file() else { return };
+            self.save_to(p, now);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // the browser downloads it, in the project's own format
+            let burn = !lbrn_first;
+            let name = format!("{stem}.{}", if burn { "burn" } else { "lbrn2" });
+            match self.project_bytes(burn) {
+                Ok(bytes) => {
+                    let mime = if burn { crate::burn::MIME } else { "application/xml" };
+                    match crate::platform::download(&name, &bytes, mime) {
+                        Ok(_) => {
+                            self.dirty = false;
+                            self.toast(format!("Downloaded {name}"), now);
+                            if !burn {
+                                self.after_lbrn_save(now);
+                            }
+                        }
+                        Err(e) => self.error(format!("Could not save: {e}"), now),
+                    }
+                }
+                Err(e) => self.error(format!("Could not save: {e}"), now),
+            }
         }
     }
 
@@ -1308,32 +1426,14 @@ impl App {
                 }
                 self.new_doc();
             }
-            Action::Open => self.pick_file(Pick::Open, "Laser projects, device profiles, EZCad2", &["lbrn2", "lbrn", "lbdev", "ezd"], now),
-            Action::Import => self.pick_file(Pick::Import, "SVG, images, projects, EZCad2", &["svg", "png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "lbrn2", "lbrn", "ezd"], now),
+            Action::Open => self.pick_file(Pick::Open, "Projects (.burn, .lbrn2), drawings, device profiles, EZCad2", &["burn", "lbrn2", "lbrn", "svg", "dxf", "pdf", "lbdev", "ezd"], now),
+            Action::Import => self.pick_file(Pick::Import, "SVG, DXF, PDF, images, projects, EZCad2", &["svg", "dxf", "pdf", "png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff", "burn", "lbrn2", "lbrn", "ezd"], now),
+            // a .burn or .lbrn2 file it came from is saved again in its format; otherwise Save As asks
             Action::Save => match self.path.clone() {
-                Some(p) if p.extension().map(|e| e == "lbrn2").unwrap_or(false) => self.save_to(p, now),
+                Some(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("burn") || e.eq_ignore_ascii_case("lbrn2")) => self.save_to(p, now),
                 _ => self.run(Action::SaveAs, ctx),
             },
-            Action::SaveAs => {
-                self.doc.sync_cuts();
-                let text = crate::lbrn::save_string(&self.doc, &self.kept);
-                let name = format!("{}.lbrn2", self.doc.title.clone().unwrap_or_else(|| "project".into()));
-                match self.save_file("LightBurn-compatible project", &["lbrn2"], &name, text.as_bytes()) {
-                    Ok(Some(p)) => {
-                        self.settings.add_recent(&p.to_string_lossy());
-                        self.save_settings(now);
-                        self.path = Some(p);
-                        self.dirty = false;
-                        self.toast("Saved", now);
-                    }
-                    Ok(None) => {
-                        self.dirty = false;
-                        self.toast(format!("Downloaded {name}"), now);
-                    }
-                    Err(Some(e)) => self.error(format!("Could not save: {e}"), now),
-                    Err(None) => {}
-                }
-            }
+            Action::SaveAs => self.save_as(now),
             Action::ExportGcode => {
                 let job = self.machine_job();
                 let name = self.gcode_file_name(job.seconds);
@@ -1387,14 +1487,23 @@ impl App {
             }
             // our own shapes were copied last (the system clipboard still holds our marker) → paste those
             Action::Paste if !crate::platform::clipboard_text().is_some_and(|t| crate::svg::is_ours(&t)) => {
-                // something newer than our own shapes is on the clipboard: paste, in this order,
-                // SVG, then a picture, then plain text as a Text shape
+                // something newer than our own shapes is on the clipboard: paste, in this order, files copied in
+                // the file manager, SVG, a picture (our own Copy as Picture gives back the shapes), then plain
+                // text as a Text shape
+                let files = crate::platform::clipboard_files();
                 let text = crate::platform::clipboard_text();
-                if let Some(t) = text.as_deref().filter(|t| is_svg_text(t)) {
+                let uris = text.as_deref().map(file_uris).unwrap_or_default();
+                if !files.is_empty() || !uris.is_empty() {
+                    self.import_paths(if files.is_empty() { uris } else { files }, now);
+                } else if let Some(t) = text.as_deref().filter(|t| is_svg_text(t)) {
                     self.paste_svg(t, now);
-                } else if let Some(png) = crate::platform::clipboard_image() {
-                    let at = self.canvas.pointer_world;
-                    self.add_image_bytes(png, "pasted.png", at, now);
+                } else if let Some((w, h, raw)) = crate::platform::clipboard_image_raw() {
+                    if self.clip_picture == Some(crate::raster::fingerprint(w, h, &raw)) && !self.clipboard.is_empty() {
+                        self.paste_shapes(a);
+                    } else if let Some(png) = crate::platform::png_bytes(w as u32, h as u32, raw) {
+                        let at = self.canvas.pointer_world;
+                        self.add_image_bytes(png, "pasted.png", at, now);
+                    }
                 } else if let Some(t) = text.filter(|t| !t.trim().is_empty()) {
                     self.paste_text(&t);
                 } else if !self.clipboard.is_empty() {
@@ -1403,6 +1512,8 @@ impl App {
                     self.toast("Nothing to paste: copy shapes, a picture, SVG or text in another app.", now);
                 }
             }
+            Action::CopyPicture => self.copy_picture(now),
+            Action::Export => self.win_export = true,
             Action::Paste | Action::PasteInPlace | Action::Duplicate => self.paste_shapes(a),
             Action::Delete => {
                 if self.tool == Tool::Nodes && !self.canvas.nodes.is_empty() {
@@ -2035,17 +2146,31 @@ impl App {
     /// images. Centred on `at`, or else where they sit on the SVG's page (the page's top-left at the bed's
     /// top-left), moved to the middle of the bed if that would leave them off it.
     pub fn add_svg(&mut self, data: &[u8], at: Option<P2>, what: &str, now: f64) {
+        match crate::svg::import(data, self.settings.device.height) {
+            Ok(imp) => self.add_imported(imp, at, &format!("{what} SVG"), now),
+            Err(e) => self.error(e, now),
+        }
+    }
+
+    /// Import page `page` of a PDF.
+    pub fn import_pdf_page(&mut self, data: &[u8], page: usize, now: f64) {
+        match crate::pdf::import(data, page, self.settings.device.height) {
+            Ok(imp) => self.add_imported(imp, None, "Imported PDF", now),
+            Err(e) => self.error(e, now),
+        }
+    }
+
+    /// Add what an importer read (SVG, DXF, PDF): outlines on the layer nearest their colour (or the layer
+    /// they name), pictures as images. Centred on `at`, or else where the drawing put them, moved to the
+    /// middle of the bed if that would leave them off it.
+    pub fn add_imported(&mut self, imp: crate::svg::Imported, at: Option<P2>, what: &str, now: f64) {
         let bed_h = self.settings.device.height;
-        let imp = match crate::svg::import(data, bed_h) {
-            Ok(i) => i,
-            Err(e) => {
-                self.error(e, now);
-                return;
-            }
-        };
         let mut shapes: Vec<Shape> = Vec::new();
         for (pd, rgb) in imp.paths {
             shapes.push(Shape::new(ShapeKind::Path(pd), Xform::IDENTITY, crate::svg::nearest_layer(rgb)));
+        }
+        for (pd, layer) in imp.on_layers {
+            shapes.push(Shape::new(ShapeKind::Path(pd), Xform::IDENTITY, layer));
         }
         let image_layer = self.image_layer();
         let n_images = imp.images.len();
@@ -2071,11 +2196,90 @@ impl App {
         self.doc.sync_cuts();
         self.sel = (start..self.doc.shapes.len()).collect();
         self.touch();
-        let mut msg = format!("{what} SVG: {n} shape(s), on the layers nearest their colours");
+        let mut msg = format!("{what}: {n} shape(s), on the layers nearest their colours");
         if imp.skipped_text > 0 {
-            msg.push_str(&format!(". {} text item(s) left out: convert text to paths in your drawing program first", imp.skipped_text));
+            msg.push_str(&format!(". {} text item(s) left out: convert text to outlines in the program that made it first", imp.skipped_text));
+        }
+        for note in &imp.notes {
+            let mut c = note.chars();
+            let first: String = c.next().map(|f| f.to_uppercase().collect()).unwrap_or_default();
+            msg.push_str(&format!(". {first}{}", c.as_str()));
         }
         self.toast(msg, now);
+    }
+
+    /// Files copied in the file manager and pasted: each is imported as if dropped on the window.
+    pub fn import_paths(&mut self, paths: Vec<PathBuf>, now: f64) {
+        for p in paths.into_iter().take(20) {
+            match std::fs::read(&p) {
+                Ok(bytes) => self.import_bytes(&p.to_string_lossy(), bytes, now),
+                Err(e) => self.error(format!("Couldn't read {}: {e}", p.display()), now),
+            }
+        }
+    }
+
+    /// Copy as Picture: the selection as a picture on the clipboard (for documents and chats). BurnCraft
+    /// remembers it, so pasting it back here gives the shapes, not a picture.
+    pub fn copy_picture(&mut self, now: f64) {
+        let shapes: Vec<Shape> = self.sel.iter().filter_map(|i| self.doc.shapes.get(*i)).cloned().collect();
+        let b = shapes.iter().fold(BBox::EMPTY, |b, s| b.union(&s.bbox()));
+        if b.is_empty() {
+            return;
+        }
+        let frame = BBox { min: b.min - p2(1.0, 1.0), max: b.max + p2(1.0, 1.0) };
+        // up to 300 DPI, at most 2000 pixels across
+        let dpi = (2000.0 * 25.4 / frame.width().max(frame.height())).min(300.0);
+        let fill = |l: usize| self.doc.cut(l).is_some_and(|c| matches!(c.mode, CutMode::Fill | CutMode::FillLine | CutMode::OffsetFill));
+        match crate::raster::render(&shapes, frame, dpi, true, &fill) {
+            Ok((w, h, rgba)) => {
+                let fp = crate::raster::fingerprint(w as usize, h as usize, &rgba);
+                if crate::platform::clipboard_set_image(w as usize, h as usize, rgba) {
+                    self.clipboard = shapes;
+                    self.clip_picture = Some(fp);
+                    self.toast(format!("Copied as a {w} × {h} picture"), now);
+                } else {
+                    self.error("The picture couldn't be put on the clipboard.", now);
+                }
+            }
+            Err(e) => self.error(e, now),
+        }
+    }
+
+    /// Save the export chosen in the Export window.
+    pub fn export_now(&mut self, ctx: &egui::Context, now: f64) {
+        let o = self.export_opts;
+        if o.format == crate::export::Format::Gcode {
+            self.run(Action::ExportGcode, ctx);
+            return;
+        }
+        self.doc.sync_cuts();
+        let shapes = crate::export::gather(&self.doc, &self.sel, &o);
+        if shapes.is_empty() {
+            self.error(if o.selection { "Nothing selected to export." } else { "Nothing to export (only layers that don't burn? Tick \u{201c}Include layers that don't burn\u{201d})." }, now);
+            return;
+        }
+        let bed = BBox { min: p2(0.0, 0.0), max: p2(self.settings.device.width, self.settings.device.height) };
+        let (bytes, note) = match crate::export::bytes(&self.doc, &shapes, bed, &o) {
+            Ok(r) => r,
+            Err(e) => {
+                self.error(e, now);
+                return;
+            }
+        };
+        let stem = self.doc.title.clone().or_else(|| self.path.as_ref().and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().to_string())).unwrap_or_else(|| "design".into());
+        let name = format!("{stem}.{}", o.format.ext());
+        match self.save_file(&format!("{} file", o.format.label()), &[o.format.ext()], &name, &bytes) {
+            Ok(_) => {
+                self.win_export = false;
+                let mut msg = format!("Exported {} shape(s) as {}", shapes.len(), o.format.label());
+                if let Some(n) = note {
+                    msg.push_str(&format!(" ({n})"));
+                }
+                self.toast(msg, now);
+            }
+            Err(Some(e)) => self.error(format!("Could not export: {e}"), now),
+            Err(None) => {}
+        }
     }
 
     /// BurnCraft's clipboard as an SVG document (framed tightly around the shapes).
@@ -2155,6 +2359,45 @@ impl App {
         self.doc.sync_cuts();
         self.sel = self.index_of_id(new_id).into_iter().collect();
     }
+}
+
+/// Copied files as some file managers put them on the clipboard as text: every line a `file://` address.
+/// Anything else (ordinary text that mentions a file) gives nothing.
+pub fn file_uris(text: &str) -> Vec<PathBuf> {
+    let lines: Vec<&str> = text.lines().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with('#')).collect();
+    if lines.is_empty() || !lines.iter().all(|l| l.starts_with("file://")) {
+        return Vec::new();
+    }
+    lines
+        .iter()
+        .filter_map(|l| {
+            // file:///home/me/a%20b.svg → /home/me/a b.svg (and file://host/… is skipped)
+            let rest = l.strip_prefix("file://")?;
+            let path = rest.strip_prefix("localhost").unwrap_or(rest);
+            if !path.starts_with('/') {
+                return None;
+            }
+            let bytes = path.as_bytes();
+            let mut out = Vec::with_capacity(bytes.len());
+            let mut i = 0;
+            while i < bytes.len() {
+                if bytes[i] == b'%' && i + 2 < bytes.len() {
+                    // (read the two digits as bytes: slicing the text could land inside a character and crash)
+                    if let Some(b) = std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                        out.push(b);
+                        i += 3;
+                        continue;
+                    }
+                }
+                out.push(bytes[i]);
+                i += 1;
+            }
+            let s = String::from_utf8(out).ok()?;
+            // Windows: file:///C:/dir/file
+            let s = if s.len() > 3 && s.as_bytes()[2] == b':' { s[1..].to_string() } else { s };
+            Some(PathBuf::from(s))
+        })
+        .collect()
 }
 
 /// Text that is an SVG document: longer than 10 characters, starts with '<', contains "<svg " and the SVG namespace.
@@ -2262,5 +2505,20 @@ mod paste_tests {
         assert!(super::is_svg_text(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0 L10 0"/></svg>"#));
         assert!(!super::is_svg_text("<svg>"));
         assert!(!super::is_svg_text("just some words to paste"));
+    }
+
+    #[test]
+    fn copied_files_as_text_are_recognised() {
+        use std::path::PathBuf;
+        assert_eq!(super::file_uris("file:///home/me/My%20Sign.svg\r\nfile:///home/me/b.dxf\n"), vec![PathBuf::from("/home/me/My Sign.svg"), PathBuf::from("/home/me/b.dxf")]);
+        assert_eq!(super::file_uris("file:///C:/Users/me/a.pdf"), vec![PathBuf::from("C:/Users/me/a.pdf")]);
+        // ordinary text that mentions a file isn't a file list
+        assert!(super::file_uris("see file:///home/me/a.svg").is_empty());
+        assert!(super::file_uris("file:///home/me/a.svg\nand some words").is_empty());
+        assert!(super::file_uris("").is_empty());
+        // another computer's files aren't fetched
+        assert!(super::file_uris("file://server/share/a.svg").is_empty());
+        // a % followed by a letter that takes several bytes doesn't crash
+        assert_eq!(super::file_uris("file:///home/me/%aé.svg"), vec![PathBuf::from("/home/me/%aé.svg")]);
     }
 }

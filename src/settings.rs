@@ -148,6 +148,8 @@ pub struct Settings {
     pub autosave: bool,
     /// The longest time between autosaves while editing goes on (minutes).
     pub autosave_minutes: f64,
+    /// The "save as .burn to keep everything" hint was shown (once, when saving a LightBurn project).
+    pub burn_hint_shown: bool,
     /// Use the system's window title bar instead of BurnCraft's own (window buttons on the tab row).
     pub system_title_bar: bool,
     /// The Welcome Tour has been seen (finished or skipped), so it doesn't start by itself again.
@@ -242,6 +244,7 @@ impl Default for Settings {
             show_welcome: true,
             autosave: true,
             autosave_minutes: 2.0,
+            burn_hint_shown: false,
             system_title_bar: false,
             tour_done: false,
             camera: Default::default(),
@@ -320,6 +323,7 @@ impl Settings {
             "show_welcome": self.show_welcome,
             "autosave": self.autosave,
             "autosave_minutes": self.autosave_minutes,
+            "burn_hint_shown": self.burn_hint_shown,
             "system_title_bar": self.system_title_bar,
             "tour_done": self.tour_done,
             "camera": serde_json::to_value(&self.camera).unwrap_or(Value::Null),
@@ -402,6 +406,7 @@ impl Settings {
         }
         s.show_welcome = b(v, "show_welcome").unwrap_or(s.show_welcome);
         s.autosave = b(v, "autosave").unwrap_or(s.autosave);
+        s.burn_hint_shown = b(v, "burn_hint_shown").unwrap_or(false);
         s.autosave_minutes = f(v, "autosave_minutes").unwrap_or(s.autosave_minutes).clamp(0.5, 60.0);
         s.system_title_bar = b(v, "system_title_bar").unwrap_or(s.system_title_bar);
         s.tour_done = b(v, "tour_done").unwrap_or(s.tour_done);

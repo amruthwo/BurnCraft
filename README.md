@@ -34,10 +34,15 @@ with **Preview** and **Frame** at low power before burning it for real.
 
 ## Features
 
-* Opens and saves LightBurn projects (`.lbrn2`, and reads older `.lbrn`).
+* Its own project files (`.burn`: everything kept, pictures stored as real files, a preview picture), and
+  LightBurn projects (opens and saves `.lbrn2`, reads older `.lbrn`).
 * SVG: import or drop `.svg` files, or paste SVG from a drawing program or browser, keeping sizes, curves,
   transforms and embedded pictures, with each colour on its matching layer. Copy puts the selection on the
-  clipboard as SVG for other programs.
+  clipboard as SVG for other programs; Copy as Picture copies it as an image for documents and chats.
+* DXF (lines, polylines with arcs, arcs, circles, ellipses, splines, nested blocks, units and colours) and
+  vector PDF (paths, curves, colours and embedded pictures, from the page you choose) import, by Import, drag
+  and drop, or pasting files copied in the file manager. Text is left out with a note; DWG isn't supported.
+* Export the design or the selection as SVG, DXF, PDF, PNG (choose the DPI) or G-code.
 * Tabbed ribbon (Home, Sketch, Modify, Arrange, Image, Laser, View) with large labelled icons, a quick-access
   bar you can drag any tool onto (12 slots + overflow), and a tool options bar.
 * CAD-style navigation: scroll to zoom at the cursor, middle- or right-drag to pan, window selection
@@ -133,6 +138,9 @@ later version. See [LICENSE](LICENSE).
   [MeerK40t](https://github.com/meerk40t/meerk40t) project (MIT licence).
 - Their licence notices are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 - SVG files are read with [usvg](https://github.com/linebender/resvg) (MIT / Apache-2.0).
+- PDF files are read and written with [lopdf](https://github.com/J-F-Liu/lopdf) (MIT), `.burn` files use
+  [zip](https://github.com/zip-rs/zip2) (MIT), and PNG export draws with
+  [tiny-skia](https://github.com/linebender/tiny-skia) (BSD-3-Clause).
 
 ## Not affiliated
 
