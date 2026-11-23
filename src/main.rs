@@ -136,6 +136,10 @@ impl Root {
             if std::env::var("BURNCRAFT_UNITS").is_ok_and(|v| v == "in") {
                 app.settings.units = settings::Units::Inch;
             }
+            // BURNCRAFT_UNITS=mm: millimetres, whatever this computer's settings say
+            if std::env::var("BURNCRAFT_UNITS").is_ok_and(|v| v == "mm") {
+                app.settings.units = settings::Units::Mm;
+            }
             // BURNCRAFT_WIN=vartext / camera opens that window in the screenshot
             match std::env::var("BURNCRAFT_WIN").unwrap_or_default().as_str() {
                 "vartext" => {

@@ -27,3 +27,6 @@ inbox/
 
 # Test files and screenshots supplied by the owner (third-party designs, desktop screenshots)
 attachments/
+
+# the showcase website, worked on locally for now
+website/
