@@ -15,10 +15,11 @@ pub enum TestKind {
     Dither,
     Color,
     Detail,
+    BurnAnt,
 }
 
 impl TestKind {
-    pub const ALL: [TestKind; 8] = [TestKind::PowerSpeed, TestKind::CutThrough, TestKind::Interval, TestKind::Focus, TestKind::KerfFit, TestKind::Dither, TestKind::Color, TestKind::Detail];
+    pub const ALL: [TestKind; 9] = [TestKind::BurnAnt, TestKind::PowerSpeed, TestKind::CutThrough, TestKind::Interval, TestKind::Focus, TestKind::KerfFit, TestKind::Dither, TestKind::Color, TestKind::Detail];
     pub fn label(self) -> &'static str {
         match self {
             TestKind::PowerSpeed => "Power × speed grid",
@@ -29,6 +30,7 @@ impl TestKind {
             TestKind::Dither => "Picture modes strip",
             TestKind::Color => "Colour on metal (MOPA fiber)",
             TestKind::Detail => "Fine detail ladder",
+            TestKind::BurnAnt => "BurnAnt benchmark",
         }
     }
     pub fn hint(self) -> &'static str {
@@ -40,6 +42,7 @@ impl TestKind {
             TestKind::KerfFit => "A kerf gauge (10 pieces in a frame) and a row of slots for your material's thickness. Measure the gap in the gauge and enter it below to get the kerf offset; the slot that fits snugly shows the allowance for joints.",
             TestKind::Dither => "The same gradient in every picture mode, to compare them on your material.",
             TestKind::Color => "Filled squares at different frequencies (across) and pulse widths (down), for colours on stainless steel and titanium with a MOPA fiber laser.",
+            TestKind::BurnAnt => "BurnCraft's standard test card (80 × 50 mm, like a Benchy for lasers): a gradient, a dithered ant, fine text, small holes, a washer that drops out when inner and outer cuts go through, and boxes to tick and lines to note your settings. Check the layers' settings for your material first.",
             TestKind::Detail => "Text from 0.5 to 4 mm tall, holes from 0.2 to 2 mm and line pairs with gaps from 0.05 to 0.5 mm: the smallest you can still read or see is your laser's detail limit.",
         }
     }
@@ -115,7 +118,24 @@ pub const PICTURES: usize = 2;
 const LABEL_HEIGHT: f64 = 2.5;
 
 fn label(doc: &mut Document, text: impl Into<String>, at: P2, height: f64) {
-    doc.shapes.push(Shape::new(ShapeKind::Text { text: text.into(), font: crate::fonts::DEFAULT_FONT.into(), height, style: Default::default(), backup: None }, Xform::translate(at.x, at.y), LABELS));
+    doc.shapes.push(text_shape(&text.into(), height, at, false, LABELS));
+}
+
+/// Text `height` mm tall whose bottom-left corner (or bottom centre, when `centred`) is at `at`. (A text
+/// shape's own position is the middle of its box, so it's measured and moved.)
+pub fn text_shape(text: &str, height: f64, at: P2, centred: bool, layer: usize) -> Shape {
+    let mut t = Shape::new(ShapeKind::Text { text: text.into(), font: crate::fonts::DEFAULT_FONT.into(), height, style: Default::default(), backup: None }, Xform::IDENTITY, layer);
+    let b = t.bbox();
+    // without the font (some test machines) its size is guessed
+    let b = if b.is_empty() {
+        let w = text.chars().count() as f64 * height * 0.55;
+        BBox { min: p2(-w / 2.0, -height / 2.0), max: p2(w / 2.0, height / 2.0) }
+    } else {
+        b
+    };
+    let x = if centred { at.x - b.center().x } else { at.x - b.min.x };
+    t.xform = Xform::translate(x, at.y - b.min.y);
+    t
 }
 
 /// A rectangle whose centre is at `c`.
@@ -131,6 +151,11 @@ fn line(a: P2, b: P2, layer: usize) -> Shape {
 
 /// A left-to-right black-to-white gradient picture.
 fn gradient(w_mm: f64, h_mm: f64, adjust: ImageAdjust, at: P2) -> Option<Shape> {
+    gradient_shape(w_mm, h_mm, adjust, at, PICTURES)
+}
+
+/// The same on any layer.
+pub fn gradient_shape(w_mm: f64, h_mm: f64, adjust: ImageAdjust, at: P2, layer: usize) -> Option<Shape> {
     let (pw, ph) = (256u32, 24u32);
     let mut rgba = Vec::with_capacity((pw * ph * 4) as usize);
     for _ in 0..ph {
@@ -141,7 +166,7 @@ fn gradient(w_mm: f64, h_mm: f64, adjust: ImageAdjust, at: P2) -> Option<Shape> 
     }
     let png = crate::platform::png_bytes(pw, ph, rgba)?;
     let data = crate::lbrn::decode_bitmap(png, "")?;
-    Some(Shape::new(ShapeKind::Bitmap { w: w_mm, h: h_mm, data, adjust }, Xform::translate(at.x, at.y), PICTURES))
+    Some(Shape::new(ShapeKind::Bitmap { w: w_mm, h: h_mm, data, adjust }, Xform::translate(at.x, at.y), layer))
 }
 
 fn f(v: f64) -> String {
@@ -151,11 +176,18 @@ fn f(v: f64) -> String {
 /// Make the test design, centred on the work area of `dev`.
 pub fn generate(p: &TestParams, dev: &crate::gcode::Device) -> Document {
     let mut doc = Document::default();
+    // plain settings to start from, not the user's saved layer defaults (extra passes, kerf, Z offset…)
+    doc.cuts = [CELLS, LABELS, PICTURES].into_iter().map(CutSetting::new).collect();
     let (cell, gap) = (p.cell.clamp(2.0, 100.0), p.gap.clamp(0.5, 50.0));
     let pitch = cell + gap;
     let lh = LABEL_HEIGHT;
     let title = |doc: &mut Document, text: String, y: f64| label(doc, text, p2(0.0, y), lh * 1.4);
     match p.kind {
+        TestKind::BurnAnt => {
+            let mut d = crate::colony::burnant();
+            center_on_bed(&mut d, dev);
+            return d;
+        }
         TestKind::PowerSpeed => {
             let (powers, speeds) = (p.power.values(), p.speed.values());
             let img = p.mode == CutMode::Image;
@@ -308,7 +340,7 @@ pub fn generate(p: &TestParams, dev: &crate::gcode::Device) -> Document {
             // text sizes (on the labels layer, engraved with the cell settings)
             let mut y = 0.0;
             for hgt in [4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5] {
-                let mut s = Shape::new(ShapeKind::Text { text: format!("{} mm BurnCraft 0123", f(hgt)), font: crate::fonts::DEFAULT_FONT.into(), height: hgt, style: Default::default(), backup: None }, Xform::translate(0.0, y), CELLS);
+                let mut s = text_shape(&format!("{} mm BurnCraft 0123", f(hgt)), hgt, p2(0.0, y), false, CELLS);
                 s.cut = cut;
                 doc.shapes.push(s);
                 y -= hgt + 2.0;
@@ -350,7 +382,13 @@ pub fn generate(p: &TestParams, dev: &crate::gcode::Device) -> Document {
     if doc.cut(CELLS).is_some() {
         doc.cut_mut(CELLS).name = "Test".into();
     }
-    // centred on the work area
+    center_on_bed(&mut doc, dev);
+    doc.title = Some(format!("Test - {}", p.kind.label()));
+    doc
+}
+
+/// Move a whole design to the middle of the work area.
+pub fn center_on_bed(doc: &mut Document, dev: &crate::gcode::Device) {
     let b = doc.shapes.iter().fold(BBox::EMPTY, |b, s| b.union(&s.bbox()));
     if !b.is_empty() {
         let d = p2(dev.width / 2.0, dev.height / 2.0) - b.center();
@@ -358,8 +396,20 @@ pub fn generate(p: &TestParams, dev: &crate::gcode::Device) -> Document {
             s.xform = s.xform.then(Xform::translate(d.x, d.y));
         }
     }
-    doc.title = Some(format!("Test - {}", p.kind.label()));
-    doc
+}
+
+/// The test's settings as text for a Colony tile's QR code.
+pub fn params_code(p: &TestParams, serial: u32, date: &str) -> String {
+    let r = |r: &Range, unit: &str| format!("{}-{}{unit} in {}", f(r.min), f(r.max), r.steps.clamp(1, 50));
+    let what = match p.kind {
+        TestKind::PowerSpeed => format!("{} power {} speed {}", p.mode.label(), r(&p.power, "%"), r(&p.speed, "mm/s")),
+        TestKind::CutThrough => format!("speed {} passes {} at {}%", r(&p.speed, "mm/s"), r(&p.passes, ""), f(p.fixed_power)),
+        TestKind::Interval => format!("interval {} at {}mm/s {}%", r(&p.interval, "mm"), f(p.fixed_speed), f(p.fixed_power)),
+        TestKind::Color => format!("frequency {} pulse {} at {}mm/s {}%", r(&p.frequency, "kHz"), r(&p.pulse, "ns"), f(p.fixed_speed), f(p.fixed_power)),
+        TestKind::KerfFit => format!("thickness {}mm at {}mm/s {}%", f(p.thickness), f(p.fixed_speed), f(p.fixed_power)),
+        _ => format!("{}mm/s {}%", f(p.fixed_speed), f(p.fixed_power)),
+    };
+    format!("Burn Colony #{serial}|{}|{what}|{date}", p.kind.label())
 }
 
 /// The kerf offset to use from the gap measured in the kerf gauge: the gap is 11 cut widths (both ends of the

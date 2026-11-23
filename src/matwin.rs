@@ -92,7 +92,12 @@ fn test_window(ctx: &Context, app: &mut App) {
                 }
                 _ => {}
             }
-            if !matches!(p.kind, TestKind::PowerSpeed | TestKind::CutThrough) {
+            if p.kind == TestKind::BurnAnt {
+                ui.label("");
+                ui.label(RichText::new("The card's layers start with ordinary settings, named \"(check)\": set them for your material in the Layers panel.").size(11.0));
+                ui.end_row();
+            }
+            if !matches!(p.kind, TestKind::PowerSpeed | TestKind::CutThrough | TestKind::BurnAnt) {
                 ui.label("Speed");
                 ui.add(crate::settings::num(&mut p.fixed_speed).range(0.1..=100_000.0).suffix(" mm/s"));
                 ui.end_row();
@@ -130,15 +135,42 @@ fn test_window(ctx: &Context, app: &mut App) {
             });
         }
         ui.add_space(6.0);
+        let kind = p.kind;
+        if kind != TestKind::BurnAnt {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut app.test_on_tile, "On a Colony tile").on_hover_text("Put the test on a collectible tile with the ant mark, its serial number, the date and a QR code holding the test's settings, on the smallest standard card it fits");
+                if app.test_on_tile {
+                    ui.label("dated");
+                    ui.add(egui::TextEdit::singleline(&mut app.tile_date).desired_width(90.0));
+                }
+            });
+        }
         ui.label(RichText::new("The test opens in a new tab. Labels burn lightly on their own layer; check the settings there. Cells each have their own settings: select one to see them.").size(11.0).weak());
         if ui.button(RichText::new("Create the test").strong()).clicked() {
             create = true;
         }
     });
     if create {
-        let doc = crate::calibrate::generate(&app.test_params, &app.settings.device);
+        let p = app.test_params.clone();
+        let mut doc = crate::calibrate::generate(&p, &app.settings.device);
+        let mut note = "Test created in a new tab. Check the settings, Frame it, then burn.".to_string();
+        if app.test_on_tile && p.kind != TestKind::BurnAnt {
+            let serial = app.next_serial(now);
+            let date = app.tile_date.clone();
+            let (tile, standard) = crate::colony::on_tile(doc, p.kind.label(), &crate::calibrate::params_code(&p, serial, &date), serial, &date);
+            doc = tile;
+            note = format!("Ant #{serial}: the test is on a Colony tile in a new tab. Check the settings, Frame it, then burn.");
+            if !standard {
+                note.push_str(" (It's too big for the standard tiles: use fewer steps or smaller squares for one.)");
+            }
+            crate::calibrate::center_on_bed(&mut doc, &app.settings.device);
+        }
+        let b = doc.shapes.iter().fold(crate::geom::BBox::EMPTY, |b, s| b.union(&s.bbox()));
+        if !crate::gcode::bed_box(&app.settings.device).contains_box(&b) {
+            note.push_str(" It's bigger than the work area: parts off the bed won't burn. Use fewer steps or smaller squares.");
+        }
         app.new_tab(Some(doc));
-        app.toast("Test created in a new tab. Check the settings, Frame it, then burn.", now);
+        app.toast(note, now);
     }
     if let Some((layer, k)) = apply_kerf {
         if app.doc.cut(layer).is_some() {
@@ -164,6 +196,7 @@ fn materials_window(ctx: &Context, app: &mut App) {
     let now = ctx.input(|i| i.time);
     let mut open = true;
     let mut delete: Option<String> = None;
+    let mut tile: Option<Material> = None;
     let mut apply: Option<Material> = None;
     let mut export = false;
     let mut import = false;
@@ -172,6 +205,16 @@ fn materials_window(ctx: &Context, app: &mut App) {
     egui::Window::new("Materials").open(&mut open).vscroll(true).max_height(crate::dialogs::fit_h(ctx)).max_width(crate::dialogs::fit_w(ctx)).default_width(520.0).show(ctx, |ui| {
         ui.label(RichText::new("Saved settings for your materials. Apply one to the current layer, or save a layer's settings (Layers panel) or a test square's (Properties) as a new one.").size(11.5));
         ui.checkbox(&mut app.materials_this_laser, format!("Only for this laser ({laser})"));
+        ui.horizontal(|ui| {
+            ui.label("Colony tiles:");
+            egui::ComboBox::from_id_salt("tile_size").selected_text(app.tile_size.label()).show_ui(ui, |ui| {
+                for t in crate::colony::TileSize::ALL {
+                    ui.selectable_value(&mut app.tile_size, t, t.label());
+                }
+            });
+            ui.label("dated");
+            ui.add(egui::TextEdit::singleline(&mut app.tile_date).desired_width(90.0));
+        });
         ui.separator();
         let mut list: Vec<usize> = (0..app.materials.materials.len()).filter(|i| !app.materials_this_laser || app.materials.materials[*i].for_laser(&laser)).collect();
         if list.is_empty() {
@@ -199,6 +242,9 @@ fn materials_window(ctx: &Context, app: &mut App) {
                         if ui.button(format!("Apply to layer {}", layer_name(app.current_layer))).clicked() {
                             apply = Some(m.clone());
                         }
+                        if ui.button("Colony tile").on_hover_text("Make a collectible tile with these settings: the ant mark, a serial number, the material, the laser, the date, a QR code holding the settings and a sample burned with them").clicked() {
+                            tile = Some(m.clone());
+                        }
                         if ui.button("Delete").clicked() {
                             delete = Some(m.id.clone());
                         }
@@ -216,6 +262,13 @@ fn materials_window(ctx: &Context, app: &mut App) {
             }
         });
     });
+    if let Some(m) = tile {
+        let serial = app.next_serial(now);
+        let mut doc = crate::colony::material_tile(&m, app.tile_size, serial, &app.tile_date.clone());
+        crate::calibrate::center_on_bed(&mut doc, &app.settings.device);
+        app.new_tab(Some(doc));
+        app.toast(format!("Ant #{serial}: a Colony tile for {} in a new tab. Check the cut and engrave layers' settings, then burn.", m.title()), now);
+    }
     if let Some(id) = delete {
         app.materials.materials.retain(|m| m.id != id);
         changed = true;

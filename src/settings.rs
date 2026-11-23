@@ -162,6 +162,8 @@ pub struct Settings {
     pub nest: crate::nest::NestSettings,
     /// Start from (absolute / user origin / current position), the job's anchor point and the user origin.
     pub job_start: crate::gcode::JobStart,
+    /// How many Colony tiles this user has made (the next one is "Ant #count+1").
+    pub colony_count: u32,
     pub selection_cad_style: bool,
     /// Layer settings applied to layers of new projects.
     pub layer_defaults: Vec<crate::model::CutSetting>,
@@ -253,6 +255,7 @@ impl Default for Settings {
             check_updates: true,
             nest: Default::default(),
             job_start: Default::default(),
+            colony_count: 0,
             selection_cad_style: true,
             layer_defaults: Vec::new(),
             pinned: ["Save", "Undo", "Redo", "ToolSelect", "ToolLine", "ToolRect", "ToolEllipse", "ToolText", "TraceImage", "Preview", "LaserStart"].iter().map(|s| s.to_string()).collect(),
@@ -333,6 +336,7 @@ impl Settings {
             "check_updates": self.check_updates,
             "nest": serde_json::to_value(&self.nest).unwrap_or(Value::Null),
             "job_start": serde_json::to_value(self.job_start).unwrap_or(Value::Null),
+            "colony_count": self.colony_count,
             "selection_cad_style": self.selection_cad_style,
             "layer_defaults": self.layer_defaults_xml(),
             "pinned": self.pinned,
@@ -421,6 +425,7 @@ impl Settings {
         if let Some(n) = v.get("nest").and_then(|n| serde_json::from_value(n.clone()).ok()) {
             s.nest = n;
         }
+        s.colony_count = v.get("colony_count").and_then(|c| c.as_u64()).unwrap_or(0).min(u32::MAX as u64 - 1) as u32;
         if let Some(j) = v.get("job_start").and_then(|j| serde_json::from_value::<crate::gcode::JobStart>(j.clone()).ok()) {
             let ok = |v: f64| if v.is_finite() { v } else { 0.0 };
             s.job_start = crate::gcode::JobStart { anchor: [j.anchor[0].min(2), j.anchor[1].min(2)], user_origin: (ok(j.user_origin.0), ok(j.user_origin.1)), ..j };

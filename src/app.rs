@@ -382,6 +382,11 @@ pub struct App {
     pub win_test: bool,
     pub test_params: crate::calibrate::TestParams,
     pub kerf_gap: f64,
+    /// Put tests on a Colony tile, and the tile size for materials' tiles.
+    pub test_on_tile: bool,
+    /// The date put on Colony tiles (today's, and it can be changed).
+    pub tile_date: String,
+    pub tile_size: crate::colony::TileSize,
     /// The material library, its window (and whether it lists only this laser's), and a material being saved.
     pub materials: crate::materials::Library,
     pub win_materials: bool,
@@ -545,6 +550,9 @@ impl App {
             win_test: false,
             test_params: Default::default(),
             kerf_gap: 0.0,
+            test_on_tile: false,
+            tile_date: crate::colony::today(),
+            tile_size: Default::default(),
             materials: crate::materials::Library::load(),
             win_materials: false,
             materials_this_laser: true,
@@ -781,6 +789,13 @@ impl App {
         if let Err(e) = self.materials.save() {
             self.error(format!("Could not save the materials: {e}"), now);
         }
+    }
+
+    /// The next Colony serial number ("Ant #n"), counted per user and remembered.
+    pub fn next_serial(&mut self, now: f64) -> u32 {
+        self.settings.colony_count = self.settings.colony_count.saturating_add(1);
+        self.save_settings(now);
+        self.settings.colony_count
     }
 
     /// Open "Save as material" for these settings (a layer's, or a test square's).

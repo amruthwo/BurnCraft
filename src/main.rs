@@ -9,6 +9,7 @@ mod autosave;
 mod barcode;
 mod calibrate;
 mod camera;
+mod colony;
 mod burn;
 mod canvas;
 mod dialogs;
@@ -137,6 +138,20 @@ impl Root {
                 "camera" => app.win_camera = true,
                 // Test & Calibrate, and a power × speed grid with one square selected
                 "test" => app.win_test = true,
+                // the BurnAnt benchmark, and a Colony tile for a material
+                "burnant" => {
+                    app.doc = colony::burnant();
+                    calibrate::center_on_bed(&mut app.doc, &app.settings.device);
+                    app.sel.clear();
+                }
+                "tile" => {
+                    let mut c = model::CutSetting::new(0);
+                    (c.speed, c.max_power, c.passes) = (8.0, 85.0, 2);
+                    let m = materials::Material::from_cut(&c, "Birch plywood", 3.0, "My diode");
+                    app.doc = colony::material_tile(&m, colony::TileSize::Card, 7, "2026-11-23");
+                    calibrate::center_on_bed(&mut app.doc, &app.settings.device);
+                    app.sel.clear();
+                }
                 "testgrid" => {
                     app.doc = calibrate::generate(&calibrate::TestParams::default(), &app.settings.device);
                     app.sel = vec![7];

@@ -29,6 +29,25 @@ Each palette colour is a layer with its own settings (Layers panel):
 
 Each square of a test burns with its **own settings** (shown in Properties when you select it), so a whole grid fits on one layer. The labels are on their own layer, burned lightly: check its settings before burning.
 
+## Burn Colony tiles and the BurnAnt
+
+The **Burn Colony** tiles are small collectibles that record the settings that worked, so they stack up into a
+reference collection for your laser:
+
+- In **Materials**, choose a tile size (card 80 × 50 mm, large card 120 × 80 mm or a 60 mm coin) and press
+  **Colony tile** on a material. The tile has the ant mark, its serial number (**Ant #1**, #2… counted on
+  this computer), the material, the laser, the settings, the date, a keyring hole, a sample burned with the
+  saved settings and a **QR code holding the settings themselves**: scan it with any phone to read how it was
+  made (no website involved).
+- In **Test & Calibrate**, tick **On a Colony tile** to put the test on the smallest standard card it fits,
+  with the ant mark, its serial number and a QR code with the test's settings.
+- The **BurnAnt benchmark** (Test & Calibrate) is one standard 80 × 50 mm card, like a Benchy for 3D printers:
+  a gradient, a dithered ant, fine text from 2 to 0.5 mm, small holes, a washer that drops out when the
+  inside and outside cuts go through, boxes to tick and lines to write the speed, power and date on. Burn one
+  on each new material or laser and compare them.
+- The tiles' cut, engrave and score layers start with ordinary settings, named "(check)": set them for your
+  material first. The QR code's dots are 0.35–0.5 mm (smaller when a material has many settings), so focus the laser well.
+
 ## Materials
 
 The **Materials** library keeps the settings that worked, for each material, thickness and laser.

@@ -76,6 +76,8 @@ with **Preview** and **Frame** at low power before burning it for real.
 * Test & Calibrate: power × speed grids, cut-through ladders, line interval, focus ramp, kerf and fit, picture
   modes, colour on metal (MOPA) and fine detail tests, each square with its own settings; a material library to
   save the settings that worked, apply them to layers and share them as a file.
+* Burn Colony tiles: collectible cards or coins with the ant mark, a serial number, the material and settings,
+  and a QR code holding the settings; and the BurnAnt benchmark card.
 * Job set-up: Start from (absolute, a user origin or the head's current position, with a 9-point job
   anchor), kerf offset, overscan on fills and images, and tabs on cuts (per layer, or clicked on by hand).
 * Variable text from `.csv` / `.txt` rows, serial numbers and the date, moving to the next row after each job.

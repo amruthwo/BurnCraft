@@ -66,6 +66,14 @@ pub struct Matrix {
     pub dark: Vec<bool>,
 }
 
+/// A QR code with the lowest error correction: the fewest, biggest dots for the text (Colony tiles, where the
+/// code is burned crisply and kept clean).
+pub fn encode_qr_compact(text: &str) -> Result<Matrix, String> {
+    let q = qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::L).map_err(|e| format!("Can't make a QR code: {e:?}"))?;
+    let w = q.width();
+    Ok(Matrix { w, h: w, dark: q.to_colors().into_iter().map(|c| c == qrcode::Color::Dark).collect() })
+}
+
 pub fn encode(kind: Kind, text: &str) -> Result<Matrix, String> {
     let bars = |v: Vec<u8>| Matrix { w: v.len(), h: 1, dark: v.into_iter().map(|b| b == 1).collect() };
     match kind {
