@@ -14,7 +14,7 @@ pub enum Icon {
     Connect, Home, Frame, Start, Pause, Stop,
     Search, Keyboard, Settings, Notes, Exit, Layers, Laser, Image,
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
-    Pen, Arc, Star, Trim, Tabs, MaskIn, MaskOut, TestGrid, Materials, TextPath, TextCircle, Warp, Bolden, Stencil, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
+    Pen, Arc, Star, Trim, Tabs, MaskIn, MaskOut, TestGrid, Materials, TextPath, TextCircle, Warp, Bolden, Stencil, Generators, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
     Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary, Nest, PlayPreview,
 }
@@ -555,6 +555,17 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             painter.add(Shape::rect_stroke(egui::Rect::from_min_max(p(0.08, 0.15), p(0.92, 0.85)), 1.0, thin, egui::StrokeKind::Middle));
             painter.circle(p(0.5, 0.5), s * 0.26, if inside { pal.soft } else { Color32::TRANSPARENT }, ac);
             line(&[(0.12, 0.8), (0.35, 0.55), (0.5, 0.68), (0.7, 0.42), (0.88, 0.62)], if inside { thin } else { st });
+        }
+        Icon::Generators => {
+            // a gear
+            let teeth = 8;
+            let pts: Vec<Pos2> = (0..teeth * 4).map(|k| {
+                let a = k as f32 * std::f32::consts::TAU / (teeth * 4) as f32;
+                let r = if (k / 2) % 2 == 0 { 0.4 } else { 0.3 };
+                p(0.5 + r * a.cos(), 0.5 + r * a.sin())
+            }).collect();
+            painter.add(Shape::closed_line(pts, st));
+            painter.circle_stroke(p(0.5, 0.5), s * 0.1, ac);
         }
         Icon::Bolden => {
             // a thin and a bold bar

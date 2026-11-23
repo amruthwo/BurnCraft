@@ -393,6 +393,16 @@ pub struct App {
     pub rotate_about: [u8; 2],
     /// The Bolden / Stencil window and its amounts (mm).
     pub win_shape_tools: bool,
+    /// The Generators window and its settings.
+    pub win_generators: bool,
+    pub gen_kind: crate::generators::GenKind,
+    pub gen_box: crate::generators::BoxParams,
+    pub gen_hinge: crate::generators::HingeParams,
+    pub gen_gear: crate::generators::GearParams,
+    pub gen_puzzle: crate::generators::PuzzleParams,
+    /// Box: the kerf offset and tabs to put on the layer the parts go on.
+    pub gen_kerf: f64,
+    pub gen_tabs: bool,
     pub bolden_amount: f64,
     pub bridge_width: f64,
     /// The date put on Colony tiles (today's, and it can be changed).
@@ -565,6 +575,14 @@ impl App {
             warp: Default::default(),
             rotate_about: [1, 1],
             win_shape_tools: false,
+            win_generators: false,
+            gen_kind: Default::default(),
+            gen_box: Default::default(),
+            gen_hinge: Default::default(),
+            gen_gear: Default::default(),
+            gen_puzzle: Default::default(),
+            gen_kerf: 0.0,
+            gen_tabs: false,
             bolden_amount: 0.2,
             bridge_width: 1.0,
             tile_date: crate::colony::today(),
@@ -2264,6 +2282,12 @@ impl App {
             Action::Rotary => self.win_rotary = !self.win_rotary,
             Action::TestCalibrate => self.win_test = !self.win_test,
             Action::Bolden | Action::StencilBridges => self.win_shape_tools = true,
+            Action::Generators => {
+                self.win_generators = !self.win_generators;
+                if self.win_generators {
+                    self.gen_kerf = self.doc.cut(self.current_layer_for_vectors()).map(|c| c.kerf).unwrap_or(0.0);
+                }
+            }
             Action::Materials => self.win_materials = !self.win_materials,
             Action::Nest => self.win_nest = true,
             Action::WelcomeTour => {

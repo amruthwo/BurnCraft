@@ -78,6 +78,7 @@ with **Preview** and **Frame** at low power before burning it for real.
   save the settings that worked, apply them to layers and share them as a file.
 * Text on a path or around a circle (still editable), warps (arch, arc, bulge, wave, rise, fisheye, perspective,
   mesh) with live handles, skew, rotate around a chosen point, bolden / thin, and stencil bridges.
+* Generators: finger-joint boxes, living hinges, spur gears and jigsaw puzzles.
 * Burn Colony tiles: collectible cards or coins with the ant mark, a serial number, the material and settings,
   and a QR code holding the settings; and the BurnAnt benchmark card.
 * Job set-up: Start from (absolute, a user origin or the head's current position, with a 9-point job

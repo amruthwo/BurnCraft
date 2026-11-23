@@ -21,6 +21,7 @@ pub struct SaveMaterial {
 pub fn all(ctx: &Context, app: &mut App) {
     test_window(ctx, app);
     shape_tools_window(ctx, app);
+    generators_window(ctx, app);
     materials_window(ctx, app);
     save_window(ctx, app);
 }
@@ -401,4 +402,209 @@ fn shape_tools_window(ctx: &Context, app: &mut App) {
     if !open {
         app.win_shape_tools = false;
     }
+}
+
+/// A length field in the chosen units (step 0.5).
+fn len(u: crate::settings::Units, v: &mut f64, lo: f64, hi: f64) -> egui::DragValue<'_> {
+    u.len(v, lo, hi, 0.5)
+}
+
+/// Generators: a box, a living hinge, a gear or a puzzle, added to the project on the current layer.
+fn generators_window(ctx: &Context, app: &mut App) {
+    use crate::generators::{self as g, GenKind};
+    if !app.win_generators {
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let mut open = true;
+    let mut create = false;
+    let mut fit_sel = false;
+    let u = app.settings.units;
+    egui::Window::new("Generators").open(&mut open).vscroll(true).max_height(crate::dialogs::fit_h(ctx)).default_width(420.0).show(ctx, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for k in GenKind::ALL {
+                ui.selectable_value(&mut app.gen_kind, k, k.label());
+            }
+        });
+        ui.separator();
+        egui::Grid::new("gen").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| match app.gen_kind {
+            GenKind::Box => {
+                let b = &mut app.gen_box;
+                ui.label("Width × depth × height");
+                ui.horizontal(|ui| {
+                    ui.add(len(u, &mut b.w, 5.0, 2000.0));
+                    ui.add(len(u, &mut b.d, 5.0, 2000.0));
+                    ui.add(len(u, &mut b.h, 5.0, 2000.0));
+                });
+                ui.end_row();
+                ui.label("Sizes are");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut b.inside, true, "Inside");
+                    ui.selectable_value(&mut b.inside, false, "Outside");
+                });
+                ui.end_row();
+                ui.label("Material thickness");
+                ui.add(u.len(&mut b.thickness, 0.2, 50.0, 0.05));
+                ui.end_row();
+                ui.label("Finger width");
+                ui.add(len(u, &mut b.finger, 1.0, 500.0)).on_hover_text("About how wide each finger is (adjusted so every edge has an odd number)");
+                ui.end_row();
+                ui.label("Lid");
+                ui.checkbox(&mut b.closed_top, "Closed top");
+                ui.end_row();
+                ui.label("Kerf offset");
+                ui.add(u.len(&mut app.gen_kerf, -2.0, 2.0, 0.005)).on_hover_text("Put on the layer so the joints fit snugly: half the cut's width (Test & Calibrate → Kerf and fit measures it), or from a material");
+                ui.end_row();
+                ui.label("Tabs");
+                ui.checkbox(&mut app.gen_tabs, "Hold the parts in the sheet");
+                ui.end_row();
+            }
+            GenKind::Hinge => {
+                let h = &mut app.gen_hinge;
+                ui.label("Area (width × height)");
+                ui.horizontal(|ui| {
+                    ui.add(len(u, &mut h.w, 1.0, 2000.0));
+                    ui.add(len(u, &mut h.h, 1.0, 2000.0));
+                    if ui.small_button("From selection").clicked() {
+                        fit_sel = true;
+                    }
+                });
+                ui.end_row();
+                ui.label("Slit length");
+                ui.add(len(u, &mut h.slit, 1.0, 1000.0));
+                ui.end_row();
+                ui.label("Bridge");
+                ui.add(u.len(&mut h.bridge, 0.2, 100.0, 0.1)).on_hover_text("Material left between slits in a column");
+                ui.end_row();
+                ui.label("Column spacing");
+                ui.add(u.len(&mut h.spacing, 0.2, 50.0, 0.05)).on_hover_text("Closer columns bend more easily (and are more fragile)");
+                ui.end_row();
+            }
+            GenKind::Gear => {
+                let gp = &mut app.gen_gear;
+                ui.label("Teeth");
+                ui.add(crate::settings::num(&mut gp.teeth).range(6..=400));
+                ui.end_row();
+                ui.label("Module");
+                ui.add(crate::settings::num(&mut gp.module).range(0.1..=50.0).speed(0.05).suffix(" mm")).on_hover_text("Tooth size: gears that mesh need the same module (circular pitch = π × module)");
+                ui.end_row();
+                ui.label("Pressure angle");
+                ui.add(crate::settings::num(&mut gp.pressure_angle).range(10.0..=35.0).suffix("°")).on_hover_text("20° is standard");
+                ui.end_row();
+                ui.label("Bore");
+                let max_bore = g::root_diameter(gp) * 0.9;
+                ui.add(u.len(&mut gp.bore, 0.0, max_bore, 0.1)).on_hover_text("The centre hole (0 = none); at most 90% of the gear's root circle");
+                ui.end_row();
+                ui.label("");
+                ui.label(RichText::new(format!("Pitch circle {} mm, outside {} mm", crate::geom::fmt_num(gp.module * gp.teeth as f64), crate::geom::fmt_num(gp.module * (gp.teeth as f64 + 2.0)))).size(11.0));
+                ui.end_row();
+            }
+            GenKind::Puzzle => {
+                let pz = &mut app.gen_puzzle;
+                ui.label("Size (width × height)");
+                ui.horizontal(|ui| {
+                    ui.add(len(u, &mut pz.w, 10.0, 2000.0));
+                    ui.add(len(u, &mut pz.h, 10.0, 2000.0));
+                    if ui.small_button("From selection").on_hover_text("The size and place of the selected picture or shape").clicked() {
+                        fit_sel = true;
+                    }
+                });
+                ui.end_row();
+                ui.label("Columns × rows");
+                ui.horizontal(|ui| {
+                    ui.add(crate::settings::num(&mut pz.cols).range(1..=100));
+                    ui.add(crate::settings::num(&mut pz.rows).range(1..=100));
+                });
+                ui.end_row();
+                ui.label("Pattern");
+                ui.horizontal(|ui| {
+                    ui.add(crate::settings::num(&mut pz.seed).range(1..=9999));
+                    if ui.small_button("Shuffle").clicked() {
+                        pz.seed = pz.seed % 9999 + 1;
+                    }
+                });
+                ui.end_row();
+            }
+        });
+        let target = free_layer(app);
+        ui.label(RichText::new(match target {
+            Some(l) => format!("Made on layer {} (unused so far), set up for cutting.", layer_name(l)),
+            None => format!("Every layer is in use: made on layer {} with its own settings (check they cut).", layer_name(app.current_layer_for_vectors())),
+        }).size(11.0).weak());
+        if ui.button(RichText::new("Create").strong()).clicked() {
+            create = true;
+        }
+    });
+    let sel_box = crate::ops::selection_bbox(&app.doc, &app.sel);
+    if fit_sel && !sel_box.is_empty() {
+        match app.gen_kind {
+            GenKind::Hinge => (app.gen_hinge.w, app.gen_hinge.h) = (sel_box.width(), sel_box.height()),
+            GenKind::Puzzle => (app.gen_puzzle.w, app.gen_puzzle.h) = (sel_box.width(), sel_box.height()),
+            _ => {}
+        }
+    }
+    if create {
+        let free = free_layer(app);
+        let layer = free.unwrap_or_else(|| app.current_layer_for_vectors());
+        let mut shapes: Vec<Shape> = match app.gen_kind {
+            GenKind::Box => g::finger_box(&app.gen_box).into_iter().map(|(n, r)| g::shape(&r, layer, &n)).collect(),
+            GenKind::Hinge => vec![g::shape(&g::living_hinge(&app.gen_hinge), layer, "Living hinge")],
+            GenKind::Gear => vec![g::shape(&g::gear(&app.gen_gear), layer, &format!("Gear {} teeth", app.gen_gear.teeth))],
+            GenKind::Puzzle => vec![g::shape(&g::puzzle(&app.gen_puzzle), layer, &format!("Puzzle {} × {}", app.gen_puzzle.cols, app.gen_puzzle.rows))],
+        };
+        // the hinge and the puzzle fill an area from 0,0: placed over the selection when it's that size; the
+        // rest centred on the bed
+        let area = match app.gen_kind {
+            GenKind::Hinge => Some((app.gen_hinge.w, app.gen_hinge.h)),
+            GenKind::Puzzle => Some((app.gen_puzzle.w, app.gen_puzzle.h)),
+            _ => None,
+        };
+        let middle = match area {
+            Some((w, h)) => crate::geom::p2(w / 2.0, h / 2.0),
+            None => shapes.iter().fold(crate::geom::BBox::EMPTY, |b, s| b.union(&s.bbox())).center(),
+        };
+        let over = area.is_some_and(|(w, h)| !sel_box.is_empty() && (sel_box.width() - w).abs() < 0.5 && (sel_box.height() - h).abs() < 0.5);
+        let target = if over { sel_box.center() } else { crate::geom::p2(app.settings.device.width / 2.0, app.settings.device.height / 2.0) };
+        let d = target - middle;
+        for s in &mut shapes {
+            s.xform = s.xform.then(crate::geom::Xform::translate(d.x, d.y));
+        }
+        app.checkpoint();
+        let first = app.doc.shapes.len();
+        app.doc.shapes.extend(shapes);
+        app.doc.sync_cuts();
+        // a layer of its own is set up for cutting; a layer already in use keeps its settings
+        if free.is_some() {
+            let c = app.doc.cut_mut(layer);
+            c.mode = CutMode::Line;
+            if app.gen_kind == GenKind::Box {
+                c.kerf = app.gen_kerf;
+                c.tabs.on = app.gen_tabs;
+            }
+        }
+        app.sel = (first..app.doc.shapes.len()).collect();
+        app.current_layer = layer;
+        app.touch();
+        let note = if free.is_some() { "Check the layer's cut settings before burning." } else { "Every layer was in use, so it shares that layer's settings: check they cut, and set the kerf and tabs there." };
+        app.toast(format!("{} made on layer {}. {note}", app.gen_kind.label(), layer_name(layer)), now);
+    }
+    if !open {
+        app.win_generators = false;
+    }
+}
+
+/// The first colour layer nothing is on yet (generated parts get their own layer, so other work keeps its
+/// settings).
+fn free_layer(app: &App) -> Option<usize> {
+    let mut used = std::collections::BTreeSet::new();
+    fn walk(s: &Shape, used: &mut std::collections::BTreeSet<usize>) {
+        match &s.kind {
+            ShapeKind::Group(ch) => ch.iter().for_each(|c| walk(c, used)),
+            _ => {
+                used.insert(s.layer);
+            }
+        }
+    }
+    app.doc.shapes.iter().for_each(|s| walk(s, &mut used));
+    (0..COLOR_LAYERS).find(|l| !used.contains(l))
 }

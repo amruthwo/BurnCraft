@@ -23,7 +23,7 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
         ],
         RibbonTab::Sketch => vec![
             ("Select", vec![ToolSelect, ToolPan, SelectAll]),
-            ("Create", vec![ToolLine, ToolPen, ToolArc, ToolRect, ToolEllipse, ToolPolygon, ToolStar, ToolText, Barcode]),
+            ("Create", vec![ToolLine, ToolPen, ToolArc, ToolRect, ToolEllipse, ToolPolygon, ToolStar, ToolText, Barcode, Generators]),
             ("Edit", vec![ToolNodes, ToolTrim, ToolFillet, JoinPaths, ConvertToPath, BreakApart]),
             ("Points", vec![NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak]),
             ("Constrain", vec![ToggleConstruction, ToolRelate, ToolDimension]),

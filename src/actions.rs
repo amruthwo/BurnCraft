@@ -96,6 +96,7 @@ actions! {
     ToolPen: "Pen / Curve", Pen, "Sketch", "Click for sharp points, click-and-drag for smooth curves. Enter or double-click finishes, click the first point to close", [], ["B"];
     ToolArc: "Arc", Arc, "Sketch", "Draw arcs: 3-point, centre, or tangent (choose in the options bar)", [], ["A"];
     ToolStar: "Star", Star, "Sketch", "Draw a star (points and depth in the options bar). Ctrl = from centre", [], [];
+    Generators: "Generators", Generators, "Sketch", "Make a finger-joint box, a living hinge, a gear or a jigsaw puzzle", [], [];
     ToolTrim: "Trim", Trim, "Sketch", "Click a piece of a line to cut it back to the nearest crossings", [], ["Shift+T"];
     ToolFillet: "Fillet / Chamfer", Fillet, "Sketch", "Click corners to round (fillet) or bevel (chamfer) them; set size in the options bar", [], ["Shift+R"];
     ToolDimension: "Dimension", Dimension, "Sketch", "Show and change lengths, arc and fillet radii, diameters, offsets and sizes", [], ["D"];

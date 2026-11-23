@@ -21,6 +21,7 @@ mod fonts;
 mod galvo;
 mod gcode;
 mod help;
+mod generators;
 mod geom;
 mod icons;
 mod imaging;

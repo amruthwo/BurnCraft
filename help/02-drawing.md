@@ -47,3 +47,12 @@ Select shapes or text, then **Warp** (Modify tab). Choose **Arch**, **Arc**, **B
 - **Bolden / Thin**: every edge of the selected shapes or text moves out by the amount (in, when it's negative). Good for text that's too thin to engrave, or for a little clearance.
 - **Stencil bridges**: for shapes cut out of a sheet as a stencil. A strip of the bridge width is left through every hole (the middle of an O, A, B…), so the piece inside stays joined to the sheet.
 - Both turn text into outlines. Open lines and pictures are left as they are.
+
+## Generators
+
+**Generators** (Sketch tab, Create) makes ready-to-cut designs on the current layer:
+
+- **Finger-joint box**: width, depth and height (inside or outside sizes), material thickness, finger width and an open or closed top. The parts (bottom, front, back, sides, top) are laid out side by side. Set the **kerf offset** (half the cut width: Test & Calibrate → Kerf and fit measures it) so the joints fit snugly, and tick **Tabs** to hold the parts in the sheet; both go on the layer.
+- **Living hinge**: columns of slits that let a sheet of wood or acrylic bend. Choose the area (or take it from the selection), the slit length, the bridge between slits and the spacing between columns.
+- **Gear**: a spur gear with proper (involute) teeth: the number of teeth, the module (gears that mesh need the same module), the pressure angle (20° is standard) and the bore.
+- **Jigsaw puzzle**: rows and columns of pieces with round tabs. Take the size from a selected picture to put the puzzle right over it; **Shuffle** changes which way the tabs point.
