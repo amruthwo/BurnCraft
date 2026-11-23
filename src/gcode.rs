@@ -1079,12 +1079,14 @@ fn emit_image(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
     let over = overscan(em.dev, cs);
     for (s, x) in on {
         let ShapeKind::Bitmap { w, h, data, adjust } = &s.kind else { continue };
-        let gray = imaging::adjusted_gray(data, adjust);
-        let dith = imaging::dither(&gray, data.width as usize, data.height as usize, adjust.dither);
         let Some(inv) = x.inverse() else { continue };
+        let step = cs.interval.max(0.02);
+        // one picture pixel per burned dot: resampled to the line interval at the size it burns, then dithered
+        let (sx, sy) = (p2(x.a, x.b).len(), p2(x.c, x.d).len());
+        let bp = imaging::burn_pixels(data, adjust, w * sx, h * sy, step);
+        let (pw, ph) = (bp.w, bp.h);
         let corners = [p2(-w / 2.0, -h / 2.0), p2(w / 2.0, -h / 2.0), p2(w / 2.0, h / 2.0), p2(-w / 2.0, h / 2.0)];
         let bb = BBox::from_points(&corners.map(|c| x.apply(c)));
-        let step = cs.interval.max(0.02);
         let sample = |p: P2| -> Option<u8> {
             let l = inv.apply(p);
             let u = (l.x + w / 2.0) / w;
@@ -1092,10 +1094,16 @@ fn emit_image(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
             if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
                 return None;
             }
-            let px = (u * data.width as f64) as usize;
-            let py = (v * data.height as f64) as usize;
-            Some(dith[py * data.width as usize + px])
+            let px = ((u * pw as f64) as usize).min(pw - 1);
+            let py = ((v * ph as f64) as usize).min(ph - 1);
+            // see-through (masked) parts never burn, not even at Grayscale's min power
+            let i = py * pw + px;
+            (!bp.is_clear(i)).then_some(bp.px[i])
         };
+        // 3D slice burns the picture once per depth step, each time only where it's dark enough
+        let slices = if adjust.dither == Dither::Slice3D { adjust.slices.clamp(1, 255) } else { 1 };
+        for slice in 0..slices {
+        let power = |g: u8| if adjust.dither == Dither::Slice3D { (imaging::slice_level(g, slices) > slice && cs.max_power > 0.01).then_some(cs.max_power) } else { image_power(g, adjust.dither, cs) };
         let mut row = 0usize;
         let mut y = bb.max.y - step * 0.5;
         while y > bb.min.y {
@@ -1109,8 +1117,8 @@ fn emit_image(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
             for i in order {
                 let (xa, xb) = if ltr { (xs[i], xs[i + 1]) } else { (xs[i + 1], xs[i]) };
                 let mid = p2((xa + xb) / 2.0, y);
-                let pw = sample(mid).and_then(|g| image_power(g, adjust.dither, cs));
-                match (run, pw) {
+                let pwr = sample(mid).and_then(power);
+                match (run, pwr) {
                     (Some((st, rp)), Some(p)) if (rp - p).abs() < 0.5 => {
                         run = Some((st, rp));
                     }
@@ -1133,6 +1141,7 @@ fn emit_image(em: &mut Emitter, on: &[&(Shape, Xform)], cs: &CutSetting) {
             if row > 100_000 {
                 break;
             }
+        }
         }
     }
 }
@@ -1204,7 +1213,9 @@ mod tests {
             let job = build_job(&doc, &dev, None);
             let burns: Vec<&Move> = job.moves.iter().filter(|m| m.power > 0.0).collect();
             assert!(!burns.is_empty(), "{mode:?}: nothing burns");
-            let burned_len: f64 = burns.iter().map(|m| m.from.dist(m.to)).sum::<f64>() / 4.0; // 4 rows in 1 mm
+            // 4 rows in 1 mm (and 3D slice burns once per depth step: on average, half the steps)
+            let passes = if mode == Dither::Slice3D { ImageAdjust::DEFAULT_SLICES as f64 } else { 1.0 };
+            let burned_len: f64 = burns.iter().map(|m| m.from.dist(m.to)).sum::<f64>() / 4.0 / passes;
             if mode == Dither::Grayscale {
                 // the power follows the darkness: highest on the black (left) end, never below the min
                 let powers: Vec<f32> = burns.iter().map(|m| m.power).collect();
@@ -1433,5 +1444,43 @@ mod laser_on_tests {
         assert!(x.abs() < 1e-9 && y.abs() < 1e-9, "ends where it started: {x} {y}");
         // absolute: unchanged
         assert!(burn_box(&build_job(&doc, &dev, None)).center().dist(p2(50.0, 50.0)) < 1e-9);
+    }
+
+    fn picture_doc(px: (u32, u32), rgba: Vec<u8>, size: f64, mode: Dither) -> Document {
+        let png = crate::platform::png_bytes(px.0, px.1, rgba).unwrap();
+        let data = crate::lbrn::decode_bitmap(png, "").unwrap();
+        let mut doc = Document::default();
+        let adjust = ImageAdjust { dither: mode, slices: 4, ..Default::default() };
+        doc.shapes.push(Shape::new(ShapeKind::Bitmap { w: size, h: size, data, adjust }, Xform::translate(50.0, 50.0), 0));
+        doc.sync_cuts();
+        let c = doc.cut_mut(0);
+        (c.mode, c.interval, c.overscan_percent, c.max_power, c.min_power) = (CutMode::Image, 1.0, 0.0, 50.0, 0.0);
+        doc
+    }
+
+    #[test]
+    fn pictures_burn_at_the_line_interval_and_3d_slices_burn_in_steps() {
+        // a black 2 × 2 px picture, 10 mm wide, at a 1 mm interval: 10 lines of 10 mm
+        let black = vec![0, 0, 0, 255].repeat(4);
+        let job = build_job(&picture_doc((2, 2), black.clone(), 10.0, Dither::Grayscale), &Device::default(), None);
+        assert!((job.cut_length - 100.0).abs() < 1e-6, "{}", job.cut_length);
+        // 3D slice with 4 steps: black gets every step
+        let job = build_job(&picture_doc((2, 2), black, 10.0, Dither::Slice3D), &Device::default(), None);
+        assert!((job.cut_length - 400.0).abs() < 1e-6, "{}", job.cut_length);
+        // mid grey: half the steps
+        let grey = vec![128, 128, 128, 255].repeat(4);
+        let job = build_job(&picture_doc((2, 2), grey, 10.0, Dither::Slice3D), &Device::default(), None);
+        assert!((job.cut_length - 200.0).abs() < 1e-6, "{}", job.cut_length);
+        // see-through (masked) parts never burn
+        let clear = vec![0, 0, 0, 0].repeat(4);
+        for mode in Dither::ALL {
+            let mut doc = picture_doc((2, 2), clear.clone(), 10.0, mode);
+            doc.cut_mut(0).min_power = 10.0;
+            // ... whatever the adjustments: inverted, and with the contrast down
+            if let ShapeKind::Bitmap { adjust, .. } = &mut doc.shapes[0].kind {
+                (adjust.invert, adjust.contrast) = (true, -50.0);
+            }
+            assert_eq!(build_job(&doc, &Device::default(), None).cut_length, 0.0, "{mode:?}");
+        }
     }
 }

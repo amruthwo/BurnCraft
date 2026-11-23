@@ -242,4 +242,36 @@ mod tests {
         let plain = Document { cuts: vec![CutSetting::new(0)], ..Default::default() };
         assert!(!crate::lbrn::save_string(&plain, &[]).contains("BcTabs"));
     }
+
+    #[test]
+    fn picture_modes_are_saved_and_layer_dither_is_read() {
+        use crate::model::*;
+        let png = crate::platform::png_bytes(2, 1, vec![0, 0, 0, 255, 255, 255, 255, 255]).unwrap();
+        let data = crate::lbrn::decode_bitmap(png, "").unwrap();
+        let mut doc = Document::default();
+        let adjust = ImageAdjust { dither: Dither::Halftone, halftone_lpi: 25.0, halftone_angle: 30.0, invert: true, ..Default::default() };
+        doc.shapes.push(Shape::new(ShapeKind::Bitmap { w: 20.0, h: 10.0, data, adjust }, Xform::translate(20.0, 20.0), 3));
+        doc.sync_cuts();
+        doc.cut_mut(3).mode = CutMode::Image;
+        let text = crate::lbrn::save_string(&doc, &[]);
+        assert!(text.contains("<ditherMode Value=\"halftone\""), "LightBurn is told the layer's mode");
+        let back = |text: &str| match crate::lbrn::load_str(text).unwrap().doc.shapes[0].kind.clone() {
+            ShapeKind::Bitmap { adjust, .. } => adjust,
+            _ => unreachable!(),
+        };
+        let a = back(&text);
+        assert_eq!((a.dither, a.halftone_lpi, a.halftone_angle, a.invert), (Dither::Halftone, 25.0, 30.0, true));
+        // a LightBurn file: no BurnCraft setting on the picture, the layer says stucki
+        let lb = text.replace(" BcDither=\"Halftone\"", "").replace("Value=\"halftone\"", "Value=\"stucki\"");
+        assert!(!lb.contains("BcDither"));
+        assert_eq!(back(&lb).dither, Dither::Stucki);
+        // .burn keeps everything too
+        let mut d2 = doc.clone();
+        if let ShapeKind::Bitmap { adjust, .. } = &mut d2.shapes[0].kind {
+            (adjust.dither, adjust.slices) = (Dither::Slice3D, 12);
+        }
+        let b = crate::burn::load(&crate::burn::save(&d2, &[]).unwrap()).unwrap();
+        let ShapeKind::Bitmap { adjust, .. } = &b.doc.shapes[0].kind else { unreachable!() };
+        assert_eq!((adjust.dither, adjust.slices), (Dither::Slice3D, 12));
+    }
 }

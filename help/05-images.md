@@ -11,6 +11,22 @@
 - **Copy** puts the selected shapes on the clipboard as SVG too, in their layer colours and real size, so programs that accept pasted SVG text can use them. **Copy as Picture** (Ctrl+Alt+C) copies the selection as a picture instead, for documents and chats; pasting that picture back into BurnCraft gives the shapes again.
 - Images go on an Image layer. Adjust brightness, contrast and gamma in the Image tab, and invert.
 
+## How a picture burns
+
+Choose the **Dithering** for a picture in Properties. The canvas shows the picture exactly as it will burn:
+
+- **Threshold**: dark parts burn, light parts don't. For logos and line art.
+- **Grayscale**: the power follows the darkness. Smooth shading, where the material shows it.
+- **Floyd–Steinberg**, **Jarvis**, **Stucki**, **Sierra** and **Atkinson** spread dots to show shades. Stucki is often the best for photos on wood; Atkinson is lighter and keeps detail, good for faces and sketches.
+- **Halftone**: a screen of round dots, like newspaper printing. Set **Lines per inch** (fewer gives bigger dots) and the **Screen angle** (45° is usual).
+- **3D slice (depth)**: depth engraving. The picture burns in several **Depth steps**, each at the layer's max power, and each step burns only the places dark enough for it, so black is burned by every step and goes deepest. This is mainly for fiber and CO2 lasers on materials that carve away (wood, stone, metal); a diode laser on wood mostly darkens. Try a small test first.
+
+Each picture is burned at the layer's **line interval**: BurnCraft resamples it to exactly one dot per line before dithering, so the dots land where the laser burns. Properties shows the picture's own resolution and the burn resolution, and warns when the picture has far fewer dots than it burns at (it will look soft or blocky: use a bigger picture, burn it smaller, or use a wider interval).
+
+## Masking a picture
+
+Select a picture and a closed shape (a rectangle, ellipse, closed path or text) on top of it, then in the Image tab choose **Keep Inside** to keep only the part inside the shape, or **Keep Outside** to cut the shape's area out. The parts left out become see-through and never burn. The shape stays, so you can delete it or burn it as an outline.
+
 ## Tracing
 
 **Trace Image** turns a picture into outlines, with a live preview. Choose the precise tracer (sharp, follows pixels) or the smooth tracer (VTracer curves), and set threshold, ignore-smaller-than, smoothing and optimising.

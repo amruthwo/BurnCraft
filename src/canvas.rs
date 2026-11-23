@@ -396,27 +396,50 @@ impl App {
     }
 
     fn texture_for(&mut self, ctx: &egui::Context, s: &Shape) -> Option<egui::TextureId> {
-        let ShapeKind::Bitmap { data, adjust, .. } = &s.kind else { return None };
+        let ShapeKind::Bitmap { data, adjust, w, h } = &s.kind else { return None };
         let mode_image = self.doc.cut(s.layer).map(|c| c.mode == CutMode::Image).unwrap_or(true);
         let invert = self.invert_bed;
+        // shown as it burns: one pixel per dot at the layer's line interval and the size it burns at (kept to
+        // a size the screen can hold)
+        let (bw, bh) = (w * p2(s.xform.a, s.xform.b).len(), h * p2(s.xform.c, s.xform.d).len());
+        let mut interval = self.doc.cut(s.layer).map(|c| c.interval).unwrap_or(0.1).max(0.001);
+        let (nw, nh) = crate::imaging::burn_grid(bw, bh, interval, 16_000_000.0);
+        let side = nw.max(nh) as f64;
+        if side > 4096.0 {
+            interval *= side / 4096.0;
+        }
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
             (adjust.brightness.to_bits(), adjust.contrast.to_bits(), adjust.gamma.to_bits(), adjust.invert, adjust.dither as u8, mode_image, invert).hash(&mut h);
+            (adjust.halftone_lpi.to_bits(), adjust.halftone_angle.to_bits(), adjust.slices, interval.to_bits(), bw.to_bits(), bh.to_bits()).hash(&mut h);
             (std::sync::Arc::as_ptr(&data.rgba) as usize).hash(&mut h);
             h.finish()
         };
         if let Some((k, t)) = self.textures.get(&s.id) {
-            if *k == key {
+            // (while something is being dragged, e.g. the picture's size, the last picture is kept: it's
+            // redrawn at the burn resolution once the drag ends)
+            if *k == key || ctx.input(|i| i.pointer.any_down()) {
                 return Some(t.id());
             }
         }
-        let gray = crate::imaging::adjusted_gray(data, adjust);
-        let mut shown = if mode_image { crate::imaging::dither(&gray, data.width as usize, data.height as usize, adjust.dither) } else { gray };
+        let (mut shown, sw, sh) = if mode_image {
+            let b = crate::imaging::burn_pixels_max(data, adjust, bw, bh, interval, 16_000_000.0);
+            (b.px, b.w, b.h)
+        } else {
+            (crate::imaging::adjusted_gray(data, adjust), data.width as usize, data.height as usize)
+        };
         if invert {
             shown.iter_mut().for_each(|v| *v = 255 - *v);
         }
-        let img = egui::ColorImage::from_gray([data.width as usize, data.height as usize], &shown);
+        // see-through parts (a masked picture) stay see-through on screen
+        let img = if data.rgba.iter().skip(3).step_by(4).any(|a| *a < 255) {
+            let alpha = crate::imaging::resample(&data.rgba.iter().skip(3).step_by(4).copied().collect::<Vec<u8>>(), data.width as usize, data.height as usize, sw, sh);
+            let px: Vec<egui::Color32> = shown.iter().zip(&alpha).map(|(g, a)| egui::Color32::from_rgba_unmultiplied(*g, *g, *g, *a)).collect();
+            egui::ColorImage { size: [sw, sh], pixels: px, source_size: egui::vec2(sw as f32, sh as f32) }
+        } else {
+            egui::ColorImage::from_gray([sw, sh], &shown)
+        };
         let tex = ctx.load_texture(format!("bmp{}", s.id), img, egui::TextureOptions::LINEAR);
         let id = tex.id();
         self.textures.insert(s.id, (key, tex));

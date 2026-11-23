@@ -132,6 +132,17 @@ impl Root {
                     app.sel = vec![2];
                 }
                 "camera" => app.win_camera = true,
+                // a halftone picture selected, with its settings in Properties
+                "halftone" => {
+                    if let Some(i) = app.doc.shapes.iter().position(|s| s.is_bitmap()) {
+                        if let model::ShapeKind::Bitmap { adjust, .. } = &mut app.doc.shapes[i].kind {
+                            adjust.dither = model::Dither::Halftone;
+                            adjust.halftone_lpi = 20.0;
+                        }
+                        app.sel = vec![i];
+                        app.side_tab = app::SideTab::Properties;
+                    }
+                }
                 // the Laser panel with Start from set to a user origin
                 "jobstart" => {
                     app.side_tab = app::SideTab::Laser;

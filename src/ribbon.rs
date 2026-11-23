@@ -47,6 +47,7 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Select", vec![ToolWand, ToolLasso, SelectionToPath, ClearSelection]),
             ("Vectorize", vec![TraceImage, TraceMcp]),
             ("Adjust", vec![ImageInvert, ImageReset]),
+            ("Mask", vec![ImageMask, ImageMaskOut]),
         ],
         RibbonTab::Laser => vec![
             ("Machine", vec![LaserConnect, LaserHome]),

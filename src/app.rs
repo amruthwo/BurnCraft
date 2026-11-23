@@ -704,6 +704,7 @@ impl App {
             Action::Undo => !self.undo.is_empty(),
             Action::Redo => !self.redo.is_empty(),
             Action::TraceImage | Action::TraceMcp | Action::ImageInvert | Action::ImageReset => self.selected_bitmap().is_some(),
+            Action::ImageMask | Action::ImageMaskOut => self.sel.iter().filter(|i| self.doc.shapes.get(**i).is_some_and(|s| s.is_bitmap())).count() == 1 && self.sel.len() >= 2,
             // the K40 is opened over USB for each job, so there's nothing to connect first (no pause on its board)
             Action::LaserHome | Action::LaserStop if self.settings.device.controller == gcode::Controller::K40Nano => cfg!(usb_lasers),
             Action::LaserPause if self.settings.device.controller == gcode::Controller::K40Nano => false,
@@ -1063,6 +1064,37 @@ impl App {
             job.gcode = crate::rotary::y_to_a(&job.gcode);
         }
         job
+    }
+
+    /// Mask the selected picture with the other selected closed shapes: keep the inside (or the outside).
+    /// The pixels left out become see-through (they never burn); the shapes stay. Returns how many changed.
+    pub fn mask_picture(&mut self, keep_inside: bool) -> Result<usize, String> {
+        let pics: Vec<usize> = self.sel.iter().copied().filter(|i| self.doc.shapes.get(*i).is_some_and(|s| s.is_bitmap())).collect();
+        let [pi] = pics[..] else { return Err("Select one picture and the closed shape to mask it with.".into()) };
+        let masks: Vec<Vec<P2>> = self.sel.iter().filter(|i| **i != pi).flat_map(|i| self.doc.shapes[*i].world_outline(0.02)).filter(|l| is_closed(l)).collect();
+        if masks.is_empty() {
+            return Err("Select a closed shape too (a rectangle, ellipse, closed path or text) to mask the picture with.".into());
+        }
+        let s = &self.doc.shapes[pi];
+        let ShapeKind::Bitmap { w, h, data, .. } = &s.kind else { unreachable!() };
+        let inv = s.xform.inverse().ok_or("This picture can't be masked (it's squashed flat).")?;
+        let (pw, ph) = (data.width as f64, data.height as f64);
+        // bed → the picture's own pixels (y down)
+        let rings: Vec<Vec<P2>> = masks.iter().map(|r| r.iter().map(|p| inv.apply(*p)).map(|l| p2((l.x + w / 2.0) / w * pw, (h / 2.0 - l.y) / h * ph)).collect()).collect();
+        let mut rgba = (*data.rgba).clone();
+        let n = crate::imaging::mask_pixels(&mut rgba, data.width as usize, data.height as usize, &rings, keep_inside);
+        if n == 0 {
+            return Err(if keep_inside { "Nothing changed: the picture is all inside the shape, or the parts outside it are already masked." } else { "Nothing changed: the shape doesn't cover the picture, or that part is already masked." }.into());
+        }
+        let png = crate::platform::png_bytes(data.width, data.height, rgba.clone()).ok_or("The masked picture couldn't be stored.")?;
+        let new = BitmapData { width: data.width, height: data.height, rgba: std::sync::Arc::new(rgba), encoded: std::sync::Arc::new(png), source_file: data.source_file.clone() };
+        self.checkpoint();
+        if let ShapeKind::Bitmap { data, .. } = &mut self.doc.shapes[pi].kind {
+            *data = new;
+        }
+        self.sel = vec![pi];
+        self.touch();
+        Ok(n)
     }
 
     /// Where the next job goes on the laser (the Laser panel's Start from). `for_file`: a saved G-code file,
@@ -1767,6 +1799,10 @@ impl App {
                     self.win_mcp = true;
                 }
             }
+            Action::ImageMask | Action::ImageMaskOut => match self.mask_picture(a == Action::ImageMask) {
+                Ok(n) => self.toast(format!("Masked: {n} pixel(s) of the picture won't burn now."), now),
+                Err(e) => self.error(e, now),
+            },
             Action::ImageInvert | Action::ImageReset => {
                 if let Some(i) = self.selected_bitmap() {
                     self.checkpoint();

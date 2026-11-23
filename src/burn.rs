@@ -213,7 +213,7 @@ fn shape_json(s: &Shape, images: &mut Images) -> Value {
         ),
         ShapeKind::Bitmap { w, h, data, adjust } => (
             "picture",
-            json!({ "width": w, "height": h, "file": format!("images/{}", images.add(data)), "source_file": data.source_file, "brightness": adjust.brightness, "contrast": adjust.contrast, "gamma": adjust.gamma, "invert": adjust.invert, "dither": format!("{:?}", adjust.dither) }),
+            json!({ "width": w, "height": h, "file": format!("images/{}", images.add(data)), "source_file": data.source_file, "brightness": adjust.brightness, "contrast": adjust.contrast, "gamma": adjust.gamma, "invert": adjust.invert, "dither": format!("{:?}", adjust.dither), "halftone_lpi": adjust.halftone_lpi, "halftone_angle": adjust.halftone_angle, "slices": adjust.slices }),
         ),
         ShapeKind::Group(ch) => ("group", json!({ "children": ch.iter().map(|c| shape_json(c, images)).collect::<Vec<_>>() })),
     };
@@ -484,7 +484,16 @@ impl ReadCtx<'_> {
                 };
                 data.source_file = s(o, "source_file");
                 let dither = o.get("dither").and_then(|v| v.as_str()).and_then(|d| Dither::ALL.into_iter().find(|x| format!("{x:?}") == d)).unwrap_or(Dither::Grayscale);
-                let adjust = ImageAdjust { brightness: f(o, "brightness", 0.0), contrast: f(o, "contrast", 0.0), gamma: f(o, "gamma", 1.0), invert: b(o, "invert", false), dither };
+                let adjust = ImageAdjust {
+                    brightness: f(o, "brightness", 0.0),
+                    contrast: f(o, "contrast", 0.0),
+                    gamma: f(o, "gamma", 1.0),
+                    invert: b(o, "invert", false),
+                    dither,
+                    halftone_lpi: f(o, "halftone_lpi", ImageAdjust::DEFAULT_LPI).clamp(1.0, 300.0),
+                    halftone_angle: f(o, "halftone_angle", ImageAdjust::DEFAULT_ANGLE),
+                    slices: o.get("slices").and_then(|v| v.as_u64()).unwrap_or(ImageAdjust::DEFAULT_SLICES as u64).clamp(1, 255) as u32,
+                };
                 ShapeKind::Bitmap { w: f(o, "width", 10.0), h: f(o, "height", 10.0), data, adjust }
             }
             "group" => {
@@ -506,7 +515,7 @@ impl ReadCtx<'_> {
             sh.extra_attrs = m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string())).collect();
         }
         const KNOWN: &[&str] = &[
-            "type", "layer", "transform", "locked", "name", "tabs", "lbrn_attributes", "points", "segments", "width", "height", "corner_radius", "radius_x", "radius_y", "sides", "text", "font", "case", "weld", "letter_spacing", "variable", "outline", "file", "source_file", "brightness", "contrast", "gamma", "invert", "dither", "children",
+            "type", "layer", "transform", "locked", "name", "tabs", "lbrn_attributes", "points", "segments", "width", "height", "corner_radius", "radius_x", "radius_y", "sides", "text", "font", "case", "weld", "letter_spacing", "variable", "outline", "file", "source_file", "brightness", "contrast", "gamma", "invert", "dither", "halftone_lpi", "halftone_angle", "slices", "children",
         ];
         for (k, v) in o.iter().filter(|(k, _)| !KNOWN.contains(&k.as_str())) {
             sh.extra_attrs.push((format!("{KEEP}{k}"), v.to_string()));
@@ -548,7 +557,7 @@ mod tests {
         doc.shapes.push(Shape::new(ShapeKind::Text { text: "Hi {Name}".into(), font: "Sans,-1,100,5,50,0,0,0,0,0".into(), height: 8.0, style: text_style, backup: None }, Xform::translate(20.0, 20.0), 0));
         let png = crate::platform::png_bytes(3, 2, (0..24).map(|i| (i * 10) as u8).collect()).unwrap();
         let bd = crate::lbrn::decode_bitmap(png, "photo.png").unwrap();
-        let adjust = ImageAdjust { brightness: 10.0, contrast: -5.0, gamma: 1.2, invert: true, dither: Dither::Jarvis };
+        let adjust = ImageAdjust { brightness: 10.0, contrast: -5.0, gamma: 1.2, invert: true, dither: Dither::Jarvis, ..Default::default() };
         doc.shapes.push(Shape::new(ShapeKind::Bitmap { w: 30.0, h: 20.0, data: bd.clone(), adjust: adjust.clone() }, Xform::translate(150.0, 50.0), 4));
         // the same picture twice is stored once
         doc.shapes.push(Shape::new(ShapeKind::Bitmap { w: 15.0, h: 10.0, data: bd, adjust }, Xform::translate(150.0, 90.0), 4));

@@ -14,7 +14,7 @@ pub enum Icon {
     Connect, Home, Frame, Start, Pause, Stop,
     Search, Keyboard, Settings, Notes, Exit, Layers, Laser, Image,
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
-    Pen, Arc, Star, Trim, Tabs, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
+    Pen, Arc, Star, Trim, Tabs, MaskIn, MaskOut, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
     Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary, Nest, PlayPreview,
 }
@@ -548,6 +548,13 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             line(&[(0.66, 0.5), (0.92, 0.5)], st);
             line(&[(0.38, 0.15), (0.38, 0.85)], thin);
             line(&[(0.66, 0.15), (0.66, 0.85)], thin);
+        }
+        Icon::MaskIn | Icon::MaskOut => {
+            // a picture (hills) with a circle: kept inside, or cut out
+            let inside = icon == Icon::MaskIn;
+            painter.add(Shape::rect_stroke(egui::Rect::from_min_max(p(0.08, 0.15), p(0.92, 0.85)), 1.0, thin, egui::StrokeKind::Middle));
+            painter.circle(p(0.5, 0.5), s * 0.26, if inside { pal.soft } else { Color32::TRANSPARENT }, ac);
+            line(&[(0.12, 0.8), (0.35, 0.55), (0.5, 0.68), (0.7, 0.42), (0.88, 0.62)], if inside { thin } else { st });
         }
         Icon::Tabs => {
             // a square cut with two gaps, and a tab marker in one

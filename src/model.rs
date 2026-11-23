@@ -336,11 +336,22 @@ pub struct ImageAdjust {
     pub gamma: f64,
     pub invert: bool,
     pub dither: Dither,
+    /// Halftone screen: dots per inch along each screen line ("lines per inch") and the screen's angle.
+    pub halftone_lpi: f64,
+    pub halftone_angle: f64,
+    /// 3D slice: how many depth steps (passes) the picture is burned in.
+    pub slices: u32,
+}
+
+impl ImageAdjust {
+    pub const DEFAULT_LPI: f64 = 40.0;
+    pub const DEFAULT_ANGLE: f64 = 45.0;
+    pub const DEFAULT_SLICES: u32 = 8;
 }
 
 impl Default for ImageAdjust {
     fn default() -> Self {
-        ImageAdjust { brightness: 0.0, contrast: 0.0, gamma: 1.0, invert: false, dither: Dither::Grayscale }
+        ImageAdjust { brightness: 0.0, contrast: 0.0, gamma: 1.0, invert: false, dither: Dither::Grayscale, halftone_lpi: Self::DEFAULT_LPI, halftone_angle: Self::DEFAULT_ANGLE, slices: Self::DEFAULT_SLICES }
     }
 }
 
@@ -350,17 +361,61 @@ pub enum Dither {
     Grayscale,
     FloydSteinberg,
     Jarvis,
+    Stucki,
+    Atkinson,
+    Sierra,
+    Halftone,
+    /// Depth engraving: the darker a place, the more passes burn it.
+    Slice3D,
 }
 
 impl Dither {
-    pub const ALL: [Dither; 4] = [Dither::Threshold, Dither::Grayscale, Dither::FloydSteinberg, Dither::Jarvis];
+    pub const ALL: [Dither; 9] = [Dither::Threshold, Dither::Grayscale, Dither::FloydSteinberg, Dither::Jarvis, Dither::Stucki, Dither::Atkinson, Dither::Sierra, Dither::Halftone, Dither::Slice3D];
     pub fn label(self) -> &'static str {
         match self {
             Dither::Threshold => "Threshold",
             Dither::Grayscale => "Grayscale",
             Dither::FloydSteinberg => "Floyd–Steinberg",
             Dither::Jarvis => "Jarvis",
+            Dither::Stucki => "Stucki",
+            Dither::Atkinson => "Atkinson",
+            Dither::Sierra => "Sierra",
+            Dither::Halftone => "Halftone",
+            Dither::Slice3D => "3D slice (depth)",
         }
+    }
+    pub fn hint(self) -> &'static str {
+        match self {
+            Dither::Threshold => "Dark parts burn, light parts don't: for logos and line art",
+            Dither::Grayscale => "The power follows the darkness: smooth shading where the material allows it",
+            Dither::FloydSteinberg => "Dots spread to show shades: a good all-round choice for photos",
+            Dither::Jarvis => "Dots spread over a wider area: smooth, a little softer",
+            Dither::Stucki => "Like Jarvis, a little sharper: often the best for photos on wood",
+            Dither::Atkinson => "Lighter, high-contrast dots that keep detail: good for faces and sketches",
+            Dither::Sierra => "Between Floyd–Steinberg and Jarvis: smooth with less noise",
+            Dither::Halftone => "A screen of round dots, like newspaper printing (set the lines per inch and angle)",
+            Dither::Slice3D => "Depth engraving: darker places get more passes and burn deeper. Mainly for fiber and CO2 lasers on materials that carve away (wood, stone, metal)",
+        }
+    }
+    /// The name a LightBurn project uses for this mode on an image layer (only the ones known for certain).
+    pub fn lbrn_name(self) -> Option<&'static str> {
+        match self {
+            Dither::Threshold => Some("threshold"),
+            Dither::Grayscale => Some("grayscale"),
+            Dither::Jarvis => Some("jarvis"),
+            Dither::Stucki => Some("stucki"),
+            Dither::Atkinson => Some("atkinson"),
+            Dither::Halftone => Some("halftone"),
+            _ => None,
+        }
+    }
+    pub fn from_lbrn_name(s: &str) -> Option<Dither> {
+        let s = s.trim().to_ascii_lowercase();
+        Dither::ALL.into_iter().find(|d| d.lbrn_name() == Some(s.as_str())).or(match s.as_str() {
+            "floyd" | "floydsteinberg" | "floyd-steinberg" => Some(Dither::FloydSteinberg),
+            "sierra" => Some(Dither::Sierra),
+            _ => None,
+        })
     }
 }
 

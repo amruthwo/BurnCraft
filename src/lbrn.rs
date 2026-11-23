@@ -11,6 +11,9 @@ use std::sync::Arc;
 struct Shared {
     verts: HashMap<String, Vec<Vert>>,
     prims: HashMap<String, PrimSpec>,
+    /// Pictures without BurnCraft's own dither setting (ids): they take their layer's, as LightBurn keeps it
+    /// per layer.
+    dither_from_layer: Vec<u64>,
 }
 
 #[derive(Clone)]
@@ -65,6 +68,20 @@ pub fn load_str(src: &str) -> Result<Loaded, String> {
         }
     }
     doc.cuts.sort_by_key(|c| c.index);
+    // pictures take their layer's dither mode (LightBurn's ditherMode) unless BurnCraft saved its own
+    if !shared.dither_from_layer.is_empty() {
+        let modes: HashMap<usize, Dither> = doc.cuts.iter().filter_map(|c| c.extra.iter().find(|(k, _)| k == "ditherMode").and_then(|(_, v)| Dither::from_lbrn_name(v)).map(|d| (c.index, d))).collect();
+        fn walk(s: &mut Shape, ids: &[u64], modes: &HashMap<usize, Dither>) {
+            if let ShapeKind::Group(ch) = &mut s.kind {
+                ch.iter_mut().for_each(|c| walk(c, ids, modes));
+            } else if let ShapeKind::Bitmap { adjust, .. } = &mut s.kind {
+                if let (true, Some(d)) = (ids.contains(&s.id), modes.get(&s.layer)) {
+                    adjust.dither = *d;
+                }
+            }
+        }
+        doc.shapes.iter_mut().for_each(|s| walk(s, &shared.dither_from_layer, &modes));
+    }
     crate::relations::from_file(&mut doc, root.attr("BcRelations"), root.attr("BcOffsets"), root.attr("BcArrays"));
     if let Some(v) = root.attr("BcVarText").and_then(|t| serde_json::from_str(t).ok()) {
         doc.vartext = v;
@@ -293,13 +310,14 @@ fn parse_path_data(n: &Node, shared: &mut Shared) -> Option<PathData> {
     Some(PathData { verts, prims })
 }
 
-const KNOWN_ATTRS: &[&str] = &["Type", "CutIndex", "Locked", "W", "H", "Cr", "Rx", "Ry", "N", "Str", "Font", "Data", "File", "VertID", "PrimID", "Gamma", "Contrast", "Brightness", "Name", "HasBackupPath", "ForceCase", "Weld", "LS", "BcCase", "BcTabs"];
+const KNOWN_ATTRS: &[&str] = &["Type", "CutIndex", "Locked", "W", "H", "Cr", "Rx", "Ry", "N", "Str", "Font", "Data", "File", "VertID", "PrimID", "Gamma", "Contrast", "Brightness", "Name", "HasBackupPath", "ForceCase", "Weld", "LS", "BcCase", "BcTabs", "BcDither", "BcInvert", "BcHalftone", "BcSlices"];
 
 fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Option<Shape> {
     let ty = n.attr("Type").unwrap_or("Path");
     let layer = n.attr_f64("CutIndex").unwrap_or(0.0).max(0.0) as usize;
     let xform = n.child("XForm").and_then(|x| Xform::parse(&x.text)).unwrap_or_default();
     let f = |k: &str, d: f64| n.attr_f64(k).unwrap_or(d);
+    let mut layer_dither = false;
     let kind = match ty {
         "Rect" => ShapeKind::Rect { w: f("W", 10.0), h: f("H", 10.0), cr: f("Cr", 0.0) },
         "Ellipse" => ShapeKind::Ellipse { rx: f("Rx", 5.0), ry: f("Ry", 5.0) },
@@ -350,11 +368,18 @@ fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Opt
                 warnings.push("An image in the project could not be decoded and was skipped.".into());
                 return None;
             };
+            let dither = n.attr("BcDither").and_then(|d| Dither::ALL.into_iter().find(|x| format!("{x:?}") == d));
+            layer_dither = dither.is_none();
+            let mut ht = n.attr("BcHalftone").unwrap_or("").split_whitespace().filter_map(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite());
             let adjust = ImageAdjust {
                 gamma: f("Gamma", 1.0),
                 contrast: f("Contrast", 0.0),
                 brightness: f("Brightness", 0.0),
-                ..Default::default()
+                invert: n.attr_bool("BcInvert").unwrap_or(false),
+                dither: dither.unwrap_or(Dither::Grayscale),
+                halftone_lpi: ht.next().unwrap_or(ImageAdjust::DEFAULT_LPI).clamp(1.0, 300.0),
+                halftone_angle: ht.next().unwrap_or(ImageAdjust::DEFAULT_ANGLE),
+                slices: n.attr_f64("BcSlices").filter(|v| v.is_finite()).map(|v| v.clamp(1.0, 255.0) as u32).unwrap_or(ImageAdjust::DEFAULT_SLICES),
             };
             ShapeKind::Bitmap { w: f("W", bd.width as f64 * 0.1), h: f("H", bd.height as f64 * 0.1), data: bd, adjust }
         }
@@ -382,6 +407,9 @@ fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Opt
         }
     };
     let mut s = Shape::new(kind, xform, layer);
+    if layer_dither {
+        shared.dither_from_layer.push(s.id);
+    }
     s.locked = n.attr_bool("Locked").unwrap_or(false);
     s.name = n.attr("Name").unwrap_or("").to_string();
     s.tabs = n.attr("BcTabs").map(parse_tabs).unwrap_or_default();
@@ -480,6 +508,17 @@ fn shape_node(s: &Shape) -> Node {
         }
         ShapeKind::Bitmap { w, h, data, adjust } => {
             n.set("W", fmt_num(*w)).set("H", fmt_num(*h)).set("Gamma", fmt_num(adjust.gamma)).set("Contrast", fmt_num(adjust.contrast)).set("Brightness", fmt_num(adjust.brightness));
+            // BurnCraft keeps these per picture (LightBurn ignores them; its layer's ditherMode is set below)
+            n.set("BcDither", format!("{:?}", adjust.dither));
+            if adjust.invert {
+                n.set("BcInvert", "1");
+            }
+            if adjust.dither == Dither::Halftone {
+                n.set("BcHalftone", format!("{} {}", fmt_num(adjust.halftone_lpi), fmt_num(adjust.halftone_angle)));
+            }
+            if adjust.dither == Dither::Slice3D {
+                n.set("BcSlices", adjust.slices.to_string());
+            }
             if !data.source_file.is_empty() {
                 n.set("File", data.source_file.clone());
             }
@@ -591,7 +630,37 @@ pub fn save_string(doc: &Document, kept: &[Node]) -> String {
         root.push(k.clone());
     }
     for c in &doc.cuts {
-        root.push(cut_node(c));
+        // an image layer tells LightBurn its pictures' dither mode, when they share one LightBurn knows
+        let mut modes: Vec<Dither> = Vec::new();
+        for s in &doc.shapes {
+            let mut leaves = Vec::new();
+            s.leaves(Xform::IDENTITY, &mut leaves);
+            for (l, _) in leaves {
+                if let (ShapeKind::Bitmap { adjust, .. }, true) = (&l.kind, l.layer == c.index) {
+                    if !modes.contains(&adjust.dither) {
+                        modes.push(adjust.dither);
+                    }
+                }
+            }
+        }
+        match (modes.as_slice(), modes.first().and_then(|d| d.lbrn_name())) {
+            ([_], Some(name)) => {
+                let mut c = c.clone();
+                c.extra.retain(|(k, _)| k != "ditherMode");
+                c.extra.push(("ditherMode".into(), name.into()));
+                root.push(cut_node(&c));
+            }
+            // pictures LightBurn's names don't cover (or several modes): don't leave an old ditherMode saying
+            // something else
+            ([_, ..], _) => {
+                let mut c = c.clone();
+                c.extra.retain(|(k, _)| k != "ditherMode");
+                root.push(cut_node(&c));
+            }
+            _ => {
+                root.push(cut_node(c));
+            }
+        }
     }
     for s in &doc.shapes {
         root.push(shape_node(s));

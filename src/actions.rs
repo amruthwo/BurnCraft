@@ -84,6 +84,8 @@ actions! {
     TraceImage: "Trace Image", Trace, "Image", "Turn an image into vector outlines", ["Alt+T"], ["Alt+T"];
     TraceMcp: "AI Outline (MCP)", Mcp, "Image", "Ask an MCP tool (for example an AI model) to find outlines in the image", [], [];
     ImageInvert: "Invert", Invert, "Image", "Swap light and dark", [], [];
+    ImageMask: "Keep Inside", MaskIn, "Image", "Select a picture and a closed shape: keep only the part of the picture inside the shape (the rest won't burn)", [], [];
+    ImageMaskOut: "Keep Outside", MaskOut, "Image", "Select a picture and a closed shape: cut the shape's area out of the picture (it won't burn)", [], [];
     ImageReset: "Reset Adjust", Reset, "Image", "Reset brightness, contrast and gamma", [], [];
     LaserConnect: "Connect", Connect, "Laser", "Connect to a GRBL laser over USB/serial", [], [];
     LaserHome: "Home", Home, "Laser", "Send the laser to its home position ($H)", [], [];

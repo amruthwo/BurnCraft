@@ -633,8 +633,18 @@ fn properties(ui: &mut Ui, app: &mut App) {
             }
         }
         ShapeKind::Bitmap { adjust, data, w, h } => {
-            ui.label(RichText::new(format!("Image {} × {} px  ·  {:.0} DPI", data.width, data.height, data.width as f64 / (*w / 25.4).max(1e-6))).size(11.5));
+            let sx = p2(app.doc.shapes[i].xform.a, app.doc.shapes[i].xform.b).len();
+            let own_dpi = data.width as f64 / (*w * sx / 25.4).max(1e-6);
+            ui.label(RichText::new(format!("Image {} × {} px  ·  {:.0} DPI", data.width, data.height, own_dpi)).size(11.5));
             let _ = h;
+            // it burns at the layer's line interval: say so, and warn when the picture has far fewer dots
+            if let Some(c) = app.doc.cut(app.doc.shapes[i].layer).filter(|c| c.mode == CutMode::Image) {
+                let burn_dpi = 25.4 / c.interval.max(0.001);
+                ui.label(RichText::new(format!("Burns at {:.0} DPI (the layer's line interval)", burn_dpi)).size(11.5));
+                if own_dpi < burn_dpi / 2.0 {
+                    ui.label(RichText::new(format!("This picture has only {:.0} DPI at this size, so it's enlarged to burn and may look soft or blocky. Use a bigger picture, burn it smaller, or use a wider line interval.", own_dpi)).size(11.0).color(Color32::from_rgb(220, 140, 40)));
+                }
+            }
             egui::Grid::new("img").num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
                 ui.label("Brightness");
                 changed |= ui.add(egui::Slider::new(&mut adjust.brightness, -100.0..=100.0)).changed();
@@ -651,11 +661,28 @@ fn properties(ui: &mut Ui, app: &mut App) {
                 ui.label("Dithering");
                 egui::ComboBox::from_id_salt("dither").selected_text(adjust.dither.label()).show_ui(ui, |ui| {
                     for d in Dither::ALL {
-                        changed |= ui.selectable_value(&mut adjust.dither, d, d.label()).changed();
+                        changed |= ui.selectable_value(&mut adjust.dither, d, d.label()).on_hover_text(d.hint()).changed();
                     }
                 });
                 ui.end_row();
+                if adjust.dither == Dither::Halftone {
+                    ui.label("Lines per inch");
+                    changed |= ui.add(crate::settings::num(&mut adjust.halftone_lpi).range(1.0..=300.0).speed(0.5)).on_hover_text("How many dots per inch along each line of the screen: fewer gives bigger, bolder dots").changed();
+                    ui.end_row();
+                    ui.label("Screen angle");
+                    changed |= ui.add(crate::settings::num(&mut adjust.halftone_angle).range(-90.0..=90.0).suffix("°")).on_hover_text("The angle of the rows of dots (45° is usual)").changed();
+                    ui.end_row();
+                }
+                if adjust.dither == Dither::Slice3D {
+                    ui.label("Depth steps");
+                    changed |= ui.add(crate::settings::num(&mut adjust.slices).range(1..=255)).on_hover_text("How many passes: each one burns the places dark enough for it, so black gets every pass and burns deepest").changed();
+                    ui.end_row();
+                }
             });
+            ui.label(RichText::new(adjust.dither.hint()).size(11.0));
+            if adjust.dither == Dither::Slice3D {
+                ui.label(RichText::new("Each step burns at the layer's max power. Try a small test first: depth depends on the laser and the material, and diode lasers on wood mostly darken rather than carve.").size(11.0));
+            }
             ui.horizontal(|ui| {
                 if ui.button("Trace Image…").clicked() {
                     app.trace.target = Some(app.doc.shapes[i].id);

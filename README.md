@@ -60,7 +60,9 @@ with **Preview** and **Frame** at low power before burning it for real.
 * Nest: pack the selected shapes tightly onto the work area or into any closed shape (an offcut, avoiding its
   holes), with spacing, margin, allowed rotations, optional mirroring and parts in holes, copies or fill-the-sheet,
   and a time limit; previewed with the material used before you apply it.
-* Images: brightness/contrast/gamma, dithering, tracing (precise or smooth curves via VTracer) with a live preview,
+* Images: brightness/contrast/gamma; threshold, grayscale, Floyd–Steinberg, Jarvis, Stucki, Sierra, Atkinson and
+  halftone dithering, and 3D slice depth engraving, all resampled to the burn resolution and shown as they burn;
+  masking a picture with a shape; tracing (precise or smooth curves via VTracer) with a live preview,
   magic wand and (magnetic) lasso selections that become outlines.
 * Optional AI outlines with the tool of your choice: Claude, any OpenAI-compatible service (OpenAI, Ollama,
   LM Studio…), or any MCP server. Images are only sent to the service you pick, and only when you use the
