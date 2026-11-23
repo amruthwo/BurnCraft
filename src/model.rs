@@ -552,7 +552,42 @@ impl TextCase {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+/// Text set along a curve or around a circle (it stays editable text).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct TextPath {
+    /// The curve in the text's own coordinates (copied from a path); empty = a circle of `radius` around the
+    /// text's position.
+    pub curve: Vec<P2>,
+    pub radius: f64,
+    /// Circle: the letters inside it, reading along the bottom. Curve: the letters hang below it.
+    pub inside: bool,
+    /// Move the text along the curve by this much (mm) from its middle (circle: from the top or bottom).
+    pub offset: f64,
+    /// Run the other way along the curve (the other side).
+    pub flip: bool,
+}
+
+impl TextPath {
+    /// Kept sensible after reading from a file: finite numbers, a curve of a sane length.
+    pub fn sanitized(mut self) -> Option<TextPath> {
+        self.curve.retain(|p| p.x.is_finite() && p.y.is_finite());
+        self.curve.truncate(100_000);
+        if !(self.radius.is_finite() && self.offset.is_finite()) {
+            return None;
+        }
+        self.radius = self.radius.clamp(0.1, 100_000.0);
+        Some(self)
+    }
+}
+
+impl Default for TextPath {
+    fn default() -> Self {
+        TextPath { curve: Vec::new(), radius: 25.0, inside: false, offset: 0.0, flip: false }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct TextStyle {
     pub case: TextCase,
     /// Merge overlapping letters into one outline (LightBurn `Weld`).
@@ -561,6 +596,8 @@ pub struct TextStyle {
     pub letter_spacing: f64,
     /// Fill in placeholders (%0, {Name}, {serial}…) from the variable text data (saved as `BcVar`).
     pub variable: bool,
+    /// Along a curve or around a circle.
+    pub path: Option<TextPath>,
 }
 
 #[derive(Clone, Debug)]
@@ -701,6 +738,15 @@ impl Shape {
                 }
             }
             _ => out.push((self.clone(), x)),
+        }
+    }
+
+    /// A picture, or a group with a picture somewhere inside.
+    pub fn has_bitmap(&self) -> bool {
+        match &self.kind {
+            ShapeKind::Bitmap { .. } => true,
+            ShapeKind::Group(ch) => ch.iter().any(|c| c.has_bitmap()),
+            _ => false,
         }
     }
 

@@ -34,6 +34,8 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Combine", vec![Weld, BoolUnion, BoolSubtract, BoolIntersect, JoinPaths]),
             ("Shape", vec![Offset, GridArray, CircularArray, PathPattern, AlignToPath, EditArray, ConvertToPath, BreakApart]),
             ("Group", vec![Group, Ungroup]),
+            ("Text", vec![TextOnPath, TextOnCircle]),
+            ("Warp", vec![ToolWarp, Bolden, StencilBridges]),
             ("Cutting", vec![ToolTabs]),
         ],
         RibbonTab::Arrange => vec![
@@ -547,7 +549,7 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
 /// Options for the active tool, in a slim bar under the ribbon (like Photoshop's options bar).
 pub fn tool_options(ui: &mut Ui, app: &mut App) {
     let tool = app.tool;
-    let has = matches!(tool, Tool::Rect | Tool::Polygon | Tool::Star | Tool::Arc | Tool::Fillet | Tool::Wand | Tool::Lasso | Tool::Nodes | Tool::Line | Tool::Pen | Tool::Trim | Tool::Relate | Tool::MirrorLine);
+    let has = matches!(tool, Tool::Rect | Tool::Polygon | Tool::Star | Tool::Arc | Tool::Fillet | Tool::Wand | Tool::Lasso | Tool::Nodes | Tool::Line | Tool::Pen | Tool::Trim | Tool::Relate | Tool::MirrorLine | Tool::Warp);
     if !has {
         return;
     }
@@ -734,6 +736,39 @@ pub fn tool_options(ui: &mut Ui, app: &mut App) {
             }
             Tool::Trim => {
                 ui.label(egui::RichText::new("The red piece is what will be removed").color(c.weak).size(11.0));
+            }
+            Tool::Warp => {
+                use crate::warp::WarpKind;
+                let w = &mut app.warp;
+                for k in WarpKind::ALL {
+                    if ui.selectable_label(w.kind == k, k.label()).clicked() {
+                        w.kind = k;
+                    }
+                }
+                if w.kind.uses_amount() {
+                    keep_together(ui, 200.0);
+                    ui.label("Amount");
+                    ui.add(egui::Slider::new(&mut w.amount, -1.0..=1.0).show_value(true));
+                }
+                if ui.button("Reset").clicked() {
+                    *w = crate::warp::Warp { kind: w.kind, ..Default::default() };
+                }
+                let apply = ui.button(egui::RichText::new("Apply").strong()).clicked();
+                ui.label(egui::RichText::new(if matches!(w.kind, WarpKind::Perspective | WarpKind::Mesh) { "Drag the handles" } else { "Drag the handle or the slider" }).color(c.weak).size(11.0));
+                if apply {
+                    let now = ui.input(|i| i.time);
+                    let sel = app.sel.clone();
+                    let warp = app.warp.clone();
+                    app.checkpoint();
+                    let (n, texts) = crate::warp::apply(&mut app.doc, &sel, &warp);
+                    app.touch();
+                    app.set_tool(Tool::Select);
+                    if texts > 0 {
+                        app.toast(format!("Warped {n} shape(s). {texts} text(s) became outlines: the words can't be edited any more (Undo brings them back)."), now);
+                    } else {
+                        app.toast(format!("Warped {n} shape(s)."), now);
+                    }
+                }
             }
             _ => {}
         }

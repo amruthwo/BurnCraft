@@ -312,7 +312,7 @@ fn parse_path_data(n: &Node, shared: &mut Shared) -> Option<PathData> {
     Some(PathData { verts, prims })
 }
 
-const KNOWN_ATTRS: &[&str] = &["Type", "CutIndex", "Locked", "W", "H", "Cr", "Rx", "Ry", "N", "Str", "Font", "Data", "File", "VertID", "PrimID", "Gamma", "Contrast", "Brightness", "Name", "HasBackupPath", "ForceCase", "Weld", "LS", "BcCase", "BcTabs", "BcDither", "BcInvert", "BcHalftone", "BcSlices", "BcCut"];
+const KNOWN_ATTRS: &[&str] = &["Type", "CutIndex", "Locked", "W", "H", "Cr", "Rx", "Ry", "N", "Str", "Font", "Data", "File", "VertID", "PrimID", "Gamma", "Contrast", "Brightness", "Name", "HasBackupPath", "ForceCase", "Weld", "LS", "BcCase", "BcTabs", "BcDither", "BcInvert", "BcHalftone", "BcSlices", "BcCut", "BcTextPath"];
 
 fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Option<Shape> {
     let ty = n.attr("Type").unwrap_or("Path");
@@ -360,7 +360,8 @@ fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Opt
                 Some(c) => TextCase::from_code(c as u8),
                 None => TextCase::from_code(f("ForceCase", 0.0) as u8),
             };
-            let style = TextStyle { case, weld: n.attr_bool("Weld").unwrap_or(false), letter_spacing: f("LS", 0.0), variable: n.attr_bool("BcVar").unwrap_or(false) };
+            let path = n.attr("BcTextPath").and_then(|t| serde_json::from_str::<TextPath>(t).ok()).and_then(|t| t.sanitized());
+            let style = TextStyle { case, weld: n.attr_bool("Weld").unwrap_or(false), letter_spacing: f("LS", 0.0), variable: n.attr_bool("BcVar").unwrap_or(false), path };
             ShapeKind::Text { text: n.attr("Str").unwrap_or("").to_string(), font: n.attr("Font").unwrap_or("").to_string(), height: f("H", 10.0), style, backup }
         }
         "Bitmap" => {
@@ -511,6 +512,10 @@ fn shape_node(s: &Shape) -> Node {
                 .set("HasBackupPath", "1");
             if style.variable {
                 n.set("BcVar", "1");
+            }
+            // text along a curve: BurnCraft's own (LightBurn shows the saved outline)
+            if let Some(tp) = &style.path {
+                n.set("BcTextPath", serde_json::to_string(tp).unwrap_or_default());
             }
         }
         ShapeKind::Bitmap { w, h, data, adjust } => {

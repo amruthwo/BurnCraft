@@ -209,7 +209,7 @@ fn shape_json(s: &Shape, images: &mut Images) -> Value {
         ShapeKind::Polygon { n, rx, ry } => ("polygon", json!({ "sides": n, "radius_x": rx, "radius_y": ry })),
         ShapeKind::Text { text, font, height, style, backup } => (
             "text",
-            json!({ "text": text, "font": font, "height": height, "case": format!("{:?}", style.case), "weld": style.weld, "letter_spacing": style.letter_spacing, "variable": style.variable, "outline": backup.as_ref().map(path_json) }),
+            json!({ "text": text, "font": font, "height": height, "case": format!("{:?}", style.case), "weld": style.weld, "letter_spacing": style.letter_spacing, "variable": style.variable, "text_path": style.path.as_ref().and_then(|t| serde_json::to_value(t).ok()), "outline": backup.as_ref().map(path_json) }),
         ),
         ShapeKind::Bitmap { w, h, data, adjust } => (
             "picture",
@@ -482,7 +482,8 @@ impl ReadCtx<'_> {
             "polygon" => ShapeKind::Polygon { n: o.get("sides").and_then(|v| v.as_u64()).unwrap_or(6).clamp(3, 1000) as u32, rx: f(o, "radius_x", 5.0), ry: f(o, "radius_y", 5.0) },
             "text" => {
                 let case = o.get("case").and_then(|v| v.as_str()).and_then(|c| TextCase::ALL.into_iter().find(|x| format!("{x:?}") == c)).unwrap_or_default();
-                let style = TextStyle { case, weld: b(o, "weld", false), letter_spacing: f(o, "letter_spacing", 0.0), variable: b(o, "variable", false) };
+                let path = o.get("text_path").and_then(|v| serde_json::from_value::<TextPath>(v.clone()).ok()).and_then(|t| t.sanitized());
+                let style = TextStyle { case, weld: b(o, "weld", false), letter_spacing: f(o, "letter_spacing", 0.0), variable: b(o, "variable", false), path };
                 ShapeKind::Text { text: s(o, "text"), font: s(o, "font"), height: f(o, "height", 10.0), style, backup: o.get("outline").and_then(|v| self.path(v)) }
             }
             "picture" => {
@@ -529,7 +530,7 @@ impl ReadCtx<'_> {
             sh.extra_attrs = m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string())).collect();
         }
         const KNOWN: &[&str] = &[
-            "type", "layer", "transform", "locked", "name", "tabs", "settings", "lbrn_attributes", "points", "segments", "width", "height", "corner_radius", "radius_x", "radius_y", "sides", "text", "font", "case", "weld", "letter_spacing", "variable", "outline", "file", "source_file", "brightness", "contrast", "gamma", "invert", "dither", "halftone_lpi", "halftone_angle", "slices", "children",
+            "type", "layer", "transform", "locked", "name", "tabs", "settings", "lbrn_attributes", "points", "segments", "width", "height", "corner_radius", "radius_x", "radius_y", "sides", "text", "font", "case", "weld", "letter_spacing", "variable", "text_path", "outline", "file", "source_file", "brightness", "contrast", "gamma", "invert", "dither", "halftone_lpi", "halftone_angle", "slices", "children",
         ];
         for (k, v) in o.iter().filter(|(k, _)| !KNOWN.contains(&k.as_str())) {
             sh.extra_attrs.push((format!("{KEEP}{k}"), v.to_string()));
@@ -567,7 +568,7 @@ mod tests {
         path.locked = true;
         doc.shapes.push(path);
         doc.shapes.push(Shape::new(ShapeKind::Rect { w: 30.0, h: 20.0, cr: 3.0 }, Xform::translate(100.0, 50.0).then_after(Xform::rotate(0.3)), 2));
-        let text_style = TextStyle { case: TextCase::ALL[1], weld: true, letter_spacing: 1.5, variable: true };
+        let text_style = TextStyle { case: TextCase::ALL[1], weld: true, letter_spacing: 1.5, variable: true, path: Some(TextPath { radius: 22.0, inside: true, offset: 3.0, ..Default::default() }) };
         doc.shapes.push(Shape::new(ShapeKind::Text { text: "Hi {Name}".into(), font: "Sans,-1,100,5,50,0,0,0,0,0".into(), height: 8.0, style: text_style, backup: None }, Xform::translate(20.0, 20.0), 0));
         let png = crate::platform::png_bytes(3, 2, (0..24).map(|i| (i * 10) as u8).collect()).unwrap();
         let bd = crate::lbrn::decode_bitmap(png, "photo.png").unwrap();

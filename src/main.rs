@@ -53,9 +53,11 @@ mod text;
 mod theme;
 mod toolpath;
 mod tour;
+mod stencil;
 mod svg;
 mod update;
 mod vecio;
+mod warp;
 mod vartext;
 mod xml;
 
@@ -80,6 +82,11 @@ struct Root {
     started: bool,
     last_title: String,
     open_on_start: Option<PathBuf>,
+}
+
+/// The screenshot window switch (BURNCRAFT_WIN) is `name`.
+fn t_is(_app: &App, name: &str) -> bool {
+    std::env::var("BURNCRAFT_WIN").is_ok_and(|v| v == name)
 }
 
 impl Root {
@@ -138,6 +145,19 @@ impl Root {
                 "camera" => app.win_camera = true,
                 // Test & Calibrate, and a power × speed grid with one square selected
                 "test" => app.win_test = true,
+                // text around a circle, and the Warp tool on the demo's text
+                "textcircle" | "warp" => {
+                    if let Some(i) = app.doc.shapes.iter().position(|s| matches!(s.kind, model::ShapeKind::Text { .. })) {
+                        app.sel = vec![i];
+                        if t_is(&app, "textcircle") {
+                            let _ = app.text_on_path(true);
+                            app.side_tab = app::SideTab::Properties;
+                        } else {
+                            app.warp = warp::Warp { kind: warp::WarpKind::Arch, amount: 0.5, ..Default::default() };
+                            app.tool = app::Tool::Warp;
+                        }
+                    }
+                }
                 // the BurnAnt benchmark, and a Colony tile for a material
                 "burnant" => {
                     app.doc = colony::burnant();

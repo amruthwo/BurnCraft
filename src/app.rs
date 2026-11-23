@@ -115,6 +115,7 @@ pub enum Tool {
     Relate,
     MirrorLine,
     Tabs,
+    Warp,
 }
 
 impl Tool {
@@ -140,6 +141,7 @@ impl Tool {
             Tool::Relate => Action::ToolRelate,
             Tool::MirrorLine => Action::ToolMirrorLine,
             Tool::Tabs => Action::ToolTabs,
+            Tool::Warp => Action::ToolWarp,
         }
     }
     pub fn hint(self) -> &'static str {
@@ -149,6 +151,7 @@ impl Tool {
             Tool::Line => "Click to add points · rest on the last point to switch the next segment to an arc · Shift locks horizontal / 45° / vertical · double-click or Enter finishes · click the first point or press C to close",
             Tool::Relate => "Click nodes, lines or circles (one or two), then pick a relation above · click a relation tag to remove it",
             Tool::MirrorLine => "Click a straight edge or construction line to mirror the selection about it",
+            Tool::Warp => "Choose a warp above, drag the handles to shape it, then Apply · Esc or another tool cancels",
             Tool::Tabs => "Click on an outline to add a tab · click a tab to remove it · set the tab width in the layer's settings",
             Tool::Rect => "Drag to draw · Shift = square · Ctrl = from centre",
             Tool::Ellipse => "Drag to draw · Shift = circle · Ctrl = from centre",
@@ -384,6 +387,14 @@ pub struct App {
     pub kerf_gap: f64,
     /// Put tests on a Colony tile, and the tile size for materials' tiles.
     pub test_on_tile: bool,
+    /// The warp being set up with the Warp tool.
+    pub warp: crate::warp::Warp,
+    /// Which point of the selection rotating turns around ([0 left, 1 centre, 2 right; 0 bottom … 2 top]).
+    pub rotate_about: [u8; 2],
+    /// The Bolden / Stencil window and its amounts (mm).
+    pub win_shape_tools: bool,
+    pub bolden_amount: f64,
+    pub bridge_width: f64,
     /// The date put on Colony tiles (today's, and it can be changed).
     pub tile_date: String,
     pub tile_size: crate::colony::TileSize,
@@ -551,6 +562,11 @@ impl App {
             test_params: Default::default(),
             kerf_gap: 0.0,
             test_on_tile: false,
+            warp: Default::default(),
+            rotate_about: [1, 1],
+            win_shape_tools: false,
+            bolden_amount: 0.2,
+            bridge_width: 1.0,
             tile_date: crate::colony::today(),
             tile_size: Default::default(),
             materials: crate::materials::Library::load(),
@@ -732,6 +748,8 @@ impl App {
             Action::Undo => !self.undo.is_empty(),
             Action::Redo => !self.redo.is_empty(),
             Action::TraceImage | Action::TraceMcp | Action::ImageInvert | Action::ImageReset => self.selected_bitmap().is_some(),
+            Action::TextOnCircle => self.sel.iter().any(|i| self.doc.shapes.get(*i).is_some_and(|s| matches!(s.kind, ShapeKind::Text { .. }))),
+            Action::TextOnPath => self.sel.len() == 2 && self.sel.iter().any(|i| self.doc.shapes.get(*i).is_some_and(|s| matches!(s.kind, ShapeKind::Text { .. }))),
             Action::ImageMask | Action::ImageMaskOut => self.sel.iter().filter(|i| self.doc.shapes.get(**i).is_some_and(|s| s.is_bitmap())).count() == 1 && self.sel.len() >= 2,
             // the K40 is opened over USB for each job, so there's nothing to connect first (no pause on its board)
             Action::LaserHome | Action::LaserStop if self.settings.device.controller == gcode::Controller::K40Nano => cfg!(usb_lasers),
@@ -1119,6 +1137,37 @@ impl App {
             job.gcode = crate::rotary::y_to_a(&job.gcode);
         }
         job
+    }
+
+    /// Put the selected text along the other selected shape's first line (copied into the text, so the text
+    /// stays editable and the curve can be deleted), or around a circle.
+    pub fn text_on_path(&mut self, circle: bool) -> Result<(), String> {
+        let ti = self.sel.iter().copied().find(|i| self.doc.shapes.get(*i).is_some_and(|s| matches!(s.kind, ShapeKind::Text { .. }))).ok_or("Select a text first.")?;
+        let tx = self.doc.shapes[ti].xform;
+        // the text's own width (before its scaling), since the circle is in the text's own coordinates
+        let width = self.doc.shapes[ti].bbox().width() / p2(tx.a, tx.b).len().max(1e-9);
+        let mut tp = TextPath::default();
+        if circle {
+            // big enough that the text goes about a third of the way round
+            tp.radius = (width / (std::f64::consts::TAU / 3.0)).max(5.0);
+        } else {
+            let pi = self.sel.iter().copied().find(|i| *i != ti).ok_or("Select the text and a line or curve to put it on.")?;
+            let line = self.doc.shapes[pi].world_outline(0.02).into_iter().max_by(|a, b| {
+                let len = |l: &Vec<P2>| l.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>();
+                len(a).total_cmp(&len(b))
+            });
+            let inv = tx.inverse().ok_or("This text is squashed flat.")?;
+            let line = line.filter(|l| l.len() >= 2).ok_or("That shape has no line to follow.")?;
+            tp.curve = line.into_iter().map(|p| inv.apply(p)).collect();
+        }
+        self.checkpoint();
+        if let ShapeKind::Text { style, backup, .. } = &mut self.doc.shapes[ti].kind {
+            style.path = Some(tp);
+            *backup = None;
+        }
+        self.sel = vec![ti];
+        self.touch();
+        Ok(())
     }
 
     /// Mask the selected picture with the other selected closed shapes: keep the inside (or the outside).
@@ -1749,7 +1798,7 @@ impl App {
             }
             Action::RotateCW | Action::RotateCCW => {
                 self.checkpoint();
-                ops::rotate(&mut self.doc, &sel, if a == Action::RotateCW { -90.0 } else { 90.0 });
+                ops::rotate_about(&mut self.doc, &sel, if a == Action::RotateCW { -90.0 } else { 90.0 }, self.rotate_about);
             }
             Action::ConvertToPath => {
                 self.checkpoint();
@@ -1854,6 +1903,10 @@ impl App {
                     self.win_mcp = true;
                 }
             }
+            Action::TextOnPath | Action::TextOnCircle => match self.text_on_path(a == Action::TextOnCircle) {
+                Ok(()) => self.toast("The text follows the curve. Change the text, its shift, side and direction in Properties.", now),
+                Err(e) => self.error(e, now),
+            },
             Action::ImageMask | Action::ImageMaskOut => match self.mask_picture(a == Action::ImageMask) {
                 Ok(n) => self.toast(format!("Masked: {n} pixel(s) of the picture won't burn now."), now),
                 Err(e) => self.error(e, now),
@@ -2096,6 +2149,14 @@ impl App {
             Action::ToolStar => self.set_tool(Tool::Star),
             Action::ToolTrim => self.set_tool(Tool::Trim),
             Action::ToolTabs => self.set_tool(Tool::Tabs),
+            Action::ToolWarp => {
+                if self.sel.is_empty() {
+                    self.error("Select the shapes to warp first.", now);
+                } else {
+                    self.warp = crate::warp::Warp { kind: self.warp.kind, ..Default::default() };
+                    self.set_tool(Tool::Warp);
+                }
+            }
             Action::ToolFillet => self.set_tool(Tool::Fillet),
             Action::ToolWand => self.set_tool(Tool::Wand),
             Action::ToolLasso => self.set_tool(Tool::Lasso),
@@ -2202,6 +2263,7 @@ impl App {
             Action::Camera => self.win_camera = !self.win_camera,
             Action::Rotary => self.win_rotary = !self.win_rotary,
             Action::TestCalibrate => self.win_test = !self.win_test,
+            Action::Bolden | Action::StencilBridges => self.win_shape_tools = true,
             Action::Materials => self.win_materials = !self.win_materials,
             Action::Nest => self.win_nest = true,
             Action::WelcomeTour => {

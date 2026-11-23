@@ -102,6 +102,11 @@ actions! {
     ToolRelate: "Relations", Relate, "Sketch", "Pick nodes, lines or circles and tie them together: horizontal, vertical, parallel, perpendicular, tangent, equal, midpoint, coincident, concentric", [], ["Shift+J"];
     ToggleConstruction: "Construction", Construction, "Sketch", "Turn the selection into construction lines (for sketching, snaps and mirror lines; never burned) or back. With nothing selected, new drawing goes on the construction layer", [], ["Q"];
     JoinPaths: "Join / Close", Join, "Sketch", "Join open lines and curves whose ends touch (within 0.05 mm) into one continuous path, and close paths whose ends meet — like LightBurn's Auto-Join", ["Alt+J"], ["Alt+J"];
+    TextOnPath: "Text on Path", TextPath, "Modify", "Select a text and a line or curve: the text runs along it (and stays editable)", [], [];
+    TextOnCircle: "Text on Circle", TextCircle, "Modify", "Set the selected text around a circle (radius, inside or outside in Properties)", [], [];
+    Bolden: "Bolden / Thin", Bolden, "Modify", "Make the selected shapes or text thicker or thinner by a set amount", [], [];
+    StencilBridges: "Stencil Bridges", Stencil, "Modify", "Add bridges so the middles of letters such as O, A and B stay attached when the shapes are cut out", [], [];
+    ToolWarp: "Warp", Warp, "Modify", "Bend the selection: arch, arc, bulge, wave, rise, fisheye, perspective (drag the corners) or a mesh (drag 9 handles)", [], [];
     ToolTabs: "Tabs", Tabs, "Modify", "Click on a cut outline to add a tab (a short uncut place that holds the part in the sheet); click a tab to remove it", [], [];
     ToolMirrorLine: "Mirror Line", MirrorLine, "Modify", "Mirror the selection about a line you click: any straight edge or a construction line", [], ["Shift+M"];
     EditArray: "Edit Array", Array, "Modify", "Change the number of copies, spacing or angle of the array the selected shape belongs to", [], [];

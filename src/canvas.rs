@@ -25,6 +25,10 @@ pub enum Drag {
     PenHandle { idx: usize },
     ImageLasso { shape_id: u64 },
     Measure { start: P2, cur: P2 },
+    /// Dragging one of the Warp tool's handles.
+    WarpHandle(usize),
+    /// Slanting the selection by a side handle (Alt): `horizontal` for the top or bottom handle.
+    Skew { anchor: P2, start: P2, horizontal: bool, orig: Vec<(usize, Xform)> },
 }
 
 #[derive(Default)]
@@ -626,7 +630,7 @@ pub fn canvas_ui(app: &mut App, ui: &mut Ui) -> Vec<Action> {
     let raw_world = hover.map(|h| tf.w(h));
     app.canvas.hover_world = raw_world;
     let moving_sel = matches!(app.canvas.drag, Some(Drag::Move { .. }));
-    let snaps = !matches!(app.tool, Tool::Select | Tool::Wand | Tool::Lasso | Tool::Trim | Tool::Tabs) || moving_sel;
+    let snaps = !matches!(app.tool, Tool::Select | Tool::Wand | Tool::Lasso | Tool::Trim | Tool::Tabs | Tool::Warp) || moving_sel;
     // the point the new segment starts from, for horizontal / vertical / parallel inference
     let anchor = match (&app.canvas.drag, app.tool) {
         (Some(Drag::Create { start, .. }), _) | (Some(Drag::Measure { start, .. }), _) => Some(*start),
@@ -1231,6 +1235,36 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
         }
     }
 
+    // the Warp tool: the bent selection and its handles
+    if app.tool == Tool::Warp && !app.sel.is_empty() {
+        let b = crate::ops::selection_bbox(&app.doc, &app.sel);
+        for (_, lines) in crate::warp::outlines(&app.doc, &app.sel) {
+            for l in lines {
+                painter.add(EShape::line(l.into_iter().map(|p| tf.s(app.warp.map(&b, p))).collect(), Stroke::new(1.6, ACCENT)));
+            }
+        }
+        let hs = app.warp.handles(&b);
+        if app.warp.kind == crate::warp::WarpKind::Mesh {
+            for k in 0..9 {
+                for n in [k + 1, k + 3] {
+                    if (n < 9) && (n != k + 1 || k % 3 != 2) {
+                        painter.line_segment([tf.s(hs[k]), tf.s(hs[n])], Stroke::new(1.0, ACCENT.gamma_multiply(0.5)));
+                    }
+                }
+            }
+        }
+        for h in hs {
+            painter.circle(tf.s(h), 6.0, Color32::WHITE, Stroke::new(2.0, ACCENT));
+        }
+    }
+    // the point rotation turns around, when it isn't the middle
+    if app.tool == Tool::Select && app.rotate_about != [1, 1] && !app.sel.is_empty() {
+        let c = tf.s(crate::gcode::anchor_point(&crate::ops::selection_bbox(&app.doc, &app.sel), app.rotate_about));
+        painter.circle_stroke(c, 5.0, Stroke::new(1.5, ACCENT));
+        painter.line_segment([c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)], Stroke::new(1.0, ACCENT));
+        painter.line_segment([c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)], Stroke::new(1.0, ACCENT));
+    }
+
     // tabs placed by hand: small marks across the outline
     for s in app.doc.shapes.iter().filter(|s| !s.tabs.is_empty()) {
         for t in &s.tabs {
@@ -1404,7 +1438,7 @@ fn paint(app: &mut App, ui: &mut Ui, ctx: &egui::Context, rect: Rect, tf: &Tf, r
     if hover.is_some() {
         match app.tool {
             Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Line | Tool::Text | Tool::Measure | Tool::Pen | Tool::Arc | Tool::Star | Tool::Lasso | Tool::Wand => ctx.set_cursor_icon(egui::CursorIcon::Crosshair),
-            Tool::Trim | Tool::Fillet | Tool::Tabs => ctx.set_cursor_icon(egui::CursorIcon::PointingHand),
+            Tool::Trim | Tool::Fillet | Tool::Tabs | Tool::Warp => ctx.set_cursor_icon(egui::CursorIcon::PointingHand),
             _ => {}
         }
     }
@@ -1476,12 +1510,24 @@ fn start_drag(app: &mut App, press: Pos2, pw: P2, psnap: P2, sel_rect: Option<Re
                 let rot = r.center_top() - vec2(0.0, 22.0);
                 let orig: Vec<(usize, Xform)> = app.sel.iter().map(|i| (*i, app.doc.shapes[*i].xform)).collect();
                 if rot.distance(press) < 9.0 {
-                    let c = sel_box.center();
+                    let c = crate::gcode::anchor_point(&sel_box, app.rotate_about);
                     app.checkpoint();
                     app.canvas.drag = Some(Drag::Rotate { center: c, start_angle: (pw.y - c.y).atan2(pw.x - c.x), orig });
                     return;
                 }
                 for (hi, h) in selection_handles(r).iter().enumerate() {
+                    // Alt on a side's middle handle: skew instead of scale
+                    if h.distance(press) < 9.0 && mods.alt && hi % 2 == 1 {
+                        let opp = selection_handles(r)[(hi + 4) % 8];
+                        let to_w = |p: Pos2| -> P2 {
+                            let fx = ((p.x - r.left()) / r.width().max(1e-3)) as f64;
+                            let fy = ((p.y - r.top()) / r.height().max(1e-3)) as f64;
+                            p2(sel_box.min.x + fx * sel_box.width(), sel_box.max.y - fy * sel_box.height())
+                        };
+                        app.checkpoint();
+                        app.canvas.drag = Some(Drag::Skew { anchor: to_w(opp), start: to_w(*h), horizontal: hi == 1 || hi == 5, orig });
+                        return;
+                    }
                     if h.distance(press) < 9.0 {
                         let opp = selection_handles(r)[(hi + 4) % 8];
                         let tfp = |p: Pos2| -> P2 {
@@ -1517,6 +1563,11 @@ fn start_drag(app: &mut App, press: Pos2, pw: P2, psnap: P2, sel_rect: Option<Re
         }
         Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Star => app.canvas.drag = Some(Drag::Create { start: psnap, cur: psnap }),
         Tool::Measure => app.canvas.drag = Some(Drag::Measure { start: psnap, cur: psnap }),
+        Tool::Warp => {
+            if let Some(i) = app.warp.handles(&sel_box).iter().position(|h| h.dist(pw) * zoom < 10.0) {
+                app.canvas.drag = Some(Drag::WarpHandle(i));
+            }
+        }
         Tool::Pen => {
             if app.canvas.pen.len() > 2 && app.canvas.pen[0].p.dist(psnap) * zoom < 10.0 {
                 finish_pen(app, true);
@@ -1665,6 +1716,29 @@ fn update_drag(app: &mut App, w: P2, snapped: P2, mods: egui::Modifiers) {
         }
         Some(Drag::Create { start, .. }) => app.canvas.drag = Some(Drag::Create { start, cur: snapped }),
         Some(Drag::Measure { start, .. }) => app.canvas.drag = Some(Drag::Measure { start, cur: snapped }),
+        Some(Drag::WarpHandle(i)) => {
+            let b = crate::ops::selection_bbox(&app.doc, &app.sel);
+            app.warp.set_handle(&b, i, w);
+            app.canvas.drag = Some(Drag::WarpHandle(i));
+        }
+        Some(Drag::Skew { anchor, start, horizontal, orig }) => {
+            // the dragged side moves along itself; the opposite side stays
+            let t = if horizontal {
+                let k = (w.x - start.x) / (start.y - anchor.y).abs().max(1e-6) * (start.y - anchor.y).signum();
+                Xform { a: 1.0, b: 0.0, c: k, d: 1.0, e: 0.0, f: 0.0 }
+            } else {
+                let k = (w.y - start.y) / (start.x - anchor.x).abs().max(1e-6) * (start.x - anchor.x).signum();
+                Xform { a: 1.0, b: k, c: 0.0, d: 1.0, e: 0.0, f: 0.0 }
+            };
+            let t = Xform::about(anchor, t);
+            for (i, x) in &orig {
+                if !app.doc.shapes[*i].locked {
+                    app.doc.shapes[*i].xform = t.then_after(*x);
+                }
+            }
+            app.touch_xform();
+            app.canvas.drag = Some(Drag::Skew { anchor, start, horizontal, orig });
+        }
         Some(Drag::NodeLasso) | Some(Drag::ImageLasso { .. }) => {
             if app.canvas.lasso_pts.last().map(|l| l.dist(w) * app.view.zoom > 3.0).unwrap_or(true) {
                 app.canvas.lasso_pts.push(w);
@@ -1747,13 +1821,13 @@ fn finish_drag(app: &mut App, w: P2, mods: egui::Modifiers, zoom: f64) {
     // what was moved stays put; the sketch relations bring everything tied to it along
     let moved: Vec<u64> = match &app.canvas.drag {
         Some(Drag::NodeMove { shape, .. }) | Some(Drag::Handle { shape, .. }) => app.doc.shapes.get(*shape).map(|s| vec![s.id]).unwrap_or_default(),
-        Some(Drag::Move { orig, .. }) | Some(Drag::Scale { orig, .. }) | Some(Drag::Rotate { orig, .. }) => orig.iter().filter_map(|(i, _)| app.doc.shapes.get(*i).map(|s| s.id)).collect(),
+        Some(Drag::Move { orig, .. }) | Some(Drag::Scale { orig, .. }) | Some(Drag::Rotate { orig, .. }) | Some(Drag::Skew { orig, .. }) => orig.iter().filter_map(|(i, _)| app.doc.shapes.get(*i).map(|s| s.id)).collect(),
         _ => Vec::new(),
     };
     let held: Option<Vec<crate::relations::Key>> = match &app.canvas.drag {
         Some(Drag::NodeMove { shape, .. }) => Some(crate::relations::keys_of(&app.doc, *shape, &app.canvas.nodes)),
         Some(Drag::Handle { shape, vert, .. }) => Some(crate::relations::keys_of(&app.doc, *shape, &[*vert])),
-        Some(Drag::Move { orig, .. }) | Some(Drag::Scale { orig, .. }) | Some(Drag::Rotate { orig, .. }) => Some(orig.iter().flat_map(|(i, _)| crate::relations::shape_keys(&app.doc, *i)).collect()),
+        Some(Drag::Move { orig, .. }) | Some(Drag::Scale { orig, .. }) | Some(Drag::Rotate { orig, .. }) | Some(Drag::Skew { orig, .. }) => Some(orig.iter().flat_map(|(i, _)| crate::relations::shape_keys(&app.doc, *i)).collect()),
         _ => None,
     };
     finish_drag_inner(app, w, mods, zoom);
@@ -2741,7 +2815,7 @@ fn welcome(ui: &mut Ui, app: &App, rect: Rect, run: &mut Vec<Action>) {
 fn draw_guides(app: &App, painter: &egui::Painter, tf: &Tf, active: bool) {
     use crate::snap::PointKind;
     let green = Color32::from_rgb(60, 200, 110);
-    let sketching = !matches!(app.tool, Tool::Select | Tool::Pan | Tool::Wand | Tool::Lasso | Tool::Trim | Tool::Tabs | Tool::Nodes | Tool::Relate | Tool::Dimension | Tool::MirrorLine) || matches!(app.canvas.drag, Some(Drag::Move { .. }) | Some(Drag::NodeMove { .. }));
+    let sketching = !matches!(app.tool, Tool::Select | Tool::Pan | Tool::Wand | Tool::Lasso | Tool::Trim | Tool::Tabs | Tool::Warp | Tool::Nodes | Tool::Relate | Tool::Dimension | Tool::MirrorLine) || matches!(app.canvas.drag, Some(Drag::Move { .. }) | Some(Drag::NodeMove { .. }));
     if !sketching {
         return;
     }

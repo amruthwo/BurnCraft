@@ -20,6 +20,7 @@ pub struct SaveMaterial {
 
 pub fn all(ctx: &Context, app: &mut App) {
     test_window(ctx, app);
+    shape_tools_window(ctx, app);
     materials_window(ctx, app);
     save_window(ctx, app);
 }
@@ -346,5 +347,58 @@ fn save_window(ctx: &Context, app: &mut App) {
         app.toast(format!("Saved {title} in Materials"), now);
     } else if open {
         app.save_material = Some(sm);
+    }
+}
+
+/// Bolden / Thin and Stencil Bridges.
+fn shape_tools_window(ctx: &Context, app: &mut App) {
+    use crate::stencil::Change;
+    if !app.win_shape_tools {
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let mut open = true;
+    let mut go: Option<Change> = None;
+    let u = app.settings.units;
+    egui::Window::new("Bolden and stencil").open(&mut open).collapsible(false).default_width(380.0).show(ctx, |ui| {
+        ui.label(RichText::new("Bolden / Thin").strong());
+        ui.horizontal(|ui| {
+            ui.label("By");
+            ui.add(u.len(&mut app.bolden_amount, -20.0, 20.0, 0.01)).on_hover_text("How much each edge moves out (negative: in)");
+            if ui.add_enabled(!app.sel.is_empty(), egui::Button::new("Apply")).clicked() {
+                go = Some(Change::Bolden(app.bolden_amount));
+            }
+        });
+        ui.label(RichText::new("Every edge moves out by this much (in, when negative), so strokes grow by twice it.").size(11.0).weak());
+        ui.separator();
+        ui.label(RichText::new("Stencil bridges").strong());
+        ui.horizontal(|ui| {
+            ui.label("Bridge width");
+            ui.add(u.len(&mut app.bridge_width, 0.05, 50.0, 0.01));
+            if ui.add_enabled(!app.sel.is_empty(), egui::Button::new("Apply")).clicked() {
+                go = Some(Change::Bridges(app.bridge_width));
+            }
+        });
+        ui.label(RichText::new("For shapes you'll cut out of a sheet as a stencil: a strip is left through every hole (the middle of an O, A, B…) so the piece inside stays joined to the rest.").size(11.0).weak());
+        if app.sel.is_empty() {
+            ui.colored_label(Color32::from_rgb(230, 150, 60), "Select the shapes or text first.");
+        }
+    });
+    if let Some(change) = go {
+        app.checkpoint();
+        let sel = app.sel.clone();
+        let (n, texts, skipped) = crate::stencil::apply(&mut app.doc, &sel, change);
+        app.touch();
+        let mut msg = format!("Changed {n} shape(s).");
+        if texts > 0 {
+            msg.push_str(&format!(" {texts} text(s) became outlines (Undo brings the words back)."));
+        }
+        if skipped > 0 {
+            msg.push_str(&format!(" {skipped} left as they were (open lines, pictures, locked, or thinned away to nothing)."));
+        }
+        app.toast(msg, now);
+    }
+    if !open {
+        app.win_shape_tools = false;
     }
 }

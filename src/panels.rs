@@ -477,6 +477,25 @@ fn properties(ui: &mut Ui, app: &mut App) {
             app.save_settings(now);
         }
     });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Rotate around").size(11.5));
+        anchor_picker(ui, &mut app.rotate_about, "Rotating turns around the selection's {} (Properties, the rotate handle, and Rotate 90°)");
+    });
+    // skew: type an angle and press the button
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Skew").size(11.5));
+        let id = egui::Id::unique("skew_amounts");
+        let (mut sx, mut sy): (f64, f64) = ui.data(|d| d.get_temp(id).unwrap_or((10.0, 0.0)));
+        ui.add(crate::settings::num(&mut sx).range(-80.0..=80.0).suffix("°")).on_hover_text("Lean sideways: the top moves right (negative: left)");
+        ui.add(crate::settings::num(&mut sy).range(-80.0..=80.0).suffix("°")).on_hover_text("Tilt: the right side moves up (negative: down)");
+        ui.data_mut(|d| d.insert_temp(id, (sx, sy)));
+        if ui.small_button("Apply").on_hover_text("Slant the selection by these angles (Alt-drag a side handle on the canvas to skew by hand)").clicked() {
+            app.checkpoint();
+            let sel = app.sel.clone();
+            crate::ops::skew(&mut app.doc, &sel, sx, sy);
+            app.touch();
+        }
+    });
     ui.label(RichText::new("Use − / +, the mouse wheel, or ↑ ↓ (Shift = ×10, Ctrl = ÷10)").size(10.5).color(theme::colors(ui.visuals().dark_mode).weak));
     let moved = cx != ocx || cy != ocy;
     let mut resized = w != ow || h != oh;
@@ -501,7 +520,9 @@ fn properties(ui: &mut Ui, app: &mut App) {
             crate::ops::transform_selection(&mut app.doc, &sel, t);
         }
         if rot != orot {
-            crate::ops::transform_selection(&mut app.doc, &sel, Xform::about(c, Xform::rotate((rot - orot).to_radians())));
+            // around the chosen point (the middle unless changed below)
+            let pivot = if app.rotate_about == [1, 1] { c } else { crate::gcode::anchor_point(&bb, app.rotate_about) };
+            crate::ops::transform_selection(&mut app.doc, &sel, Xform::about(pivot, Xform::rotate((rot - orot).to_radians())));
         }
         if moved {
             let now_at = anchor_of(&app.selection_box());
@@ -681,6 +702,35 @@ fn properties(ui: &mut Ui, app: &mut App) {
             });
             if style.variable {
                 ui.label(RichText::new(format!("Burns as: {}", crate::vartext::resolve(text))).size(11.0));
+            }
+            // along a curve or around a circle
+            let mut drop_path = false;
+            if let Some(tp) = &mut style.path {
+                ui.separator();
+                ui.label(RichText::new(if tp.curve.len() < 2 { "Around a circle" } else { "Along a curve" }).strong());
+                egui::Grid::new("textpath").num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
+                    if tp.curve.len() < 2 {
+                        ui.label("Radius");
+                        redraw |= ui.add(u.len(&mut tp.radius, 0.5, 5000.0, 0.1)).changed();
+                        ui.end_row();
+                    }
+                    ui.label("Shift along");
+                    redraw |= ui.add(u.len(&mut tp.offset, -10_000.0, 10_000.0, 0.1)).on_hover_text("Move the text along the curve from its middle").changed();
+                    ui.end_row();
+                    ui.label(if tp.curve.len() < 2 { "Inside" } else { "Below the curve" });
+                    redraw |= ui.checkbox(&mut tp.inside, "").on_hover_text("Circle: letters inside it, along the bottom. Curve: letters hang below it").changed();
+                    ui.end_row();
+                    ui.label("Flip");
+                    redraw |= ui.checkbox(&mut tp.flip, "").on_hover_text("Run the other way round, on the other side").changed();
+                    ui.end_row();
+                });
+                if ui.button("Straighten").on_hover_text("Put the text back on a straight line").clicked() {
+                    drop_path = true;
+                }
+            }
+            if drop_path {
+                style.path = None;
+                redraw = true;
             }
             if redraw {
                 *backup = None;

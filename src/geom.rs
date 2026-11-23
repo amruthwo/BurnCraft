@@ -2,7 +2,7 @@
 
 use std::ops::{Add, Mul, Neg, Sub};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct P2 {
     pub x: f64,
     pub y: f64,

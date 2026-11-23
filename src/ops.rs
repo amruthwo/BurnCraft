@@ -24,9 +24,19 @@ pub fn flip(doc: &mut Document, sel: &[usize], horizontal: bool) {
     transform_selection(doc, sel, Xform::about(c, t));
 }
 
-pub fn rotate(doc: &mut Document, sel: &[usize], deg: f64) {
-    let c = selection_bbox(doc, sel).center();
+/// Rotate around a point of the selection's box ([0 left, 1 centre, 2 right; 0 bottom … 2 top]).
+pub fn rotate_about(doc: &mut Document, sel: &[usize], deg: f64, about: [u8; 2]) {
+    let c = crate::gcode::anchor_point(&selection_bbox(doc, sel), about);
     transform_selection(doc, sel, Xform::about(c, Xform::rotate(deg.to_radians())));
+}
+
+/// Slant the selection: `x_deg` leans vertical lines (top moves right), `y_deg` tilts horizontal ones (right
+/// side moves up), about the box's middle.
+pub fn skew(doc: &mut Document, sel: &[usize], x_deg: f64, y_deg: f64) {
+    let c = selection_bbox(doc, sel).center();
+    let k = |d: f64| d.clamp(-80.0, 80.0).to_radians().tan();
+    let t = Xform { a: 1.0, b: k(y_deg), c: k(x_deg), d: 1.0, e: 0.0, f: 0.0 };
+    transform_selection(doc, sel, Xform::about(c, t));
 }
 
 #[derive(Clone, Copy, Debug)]

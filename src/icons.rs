@@ -14,7 +14,7 @@ pub enum Icon {
     Connect, Home, Frame, Start, Pause, Stop,
     Search, Keyboard, Settings, Notes, Exit, Layers, Laser, Image,
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
-    Pen, Arc, Star, Trim, Tabs, MaskIn, MaskOut, TestGrid, Materials, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
+    Pen, Arc, Star, Trim, Tabs, MaskIn, MaskOut, TestGrid, Materials, TextPath, TextCircle, Warp, Bolden, Stencil, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
     Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary, Nest, PlayPreview,
 }
@@ -555,6 +555,37 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             painter.add(Shape::rect_stroke(egui::Rect::from_min_max(p(0.08, 0.15), p(0.92, 0.85)), 1.0, thin, egui::StrokeKind::Middle));
             painter.circle(p(0.5, 0.5), s * 0.26, if inside { pal.soft } else { Color32::TRANSPARENT }, ac);
             line(&[(0.12, 0.8), (0.35, 0.55), (0.5, 0.68), (0.7, 0.42), (0.88, 0.62)], if inside { thin } else { st });
+        }
+        Icon::Bolden => {
+            // a thin and a bold bar
+            painter.rect_filled(egui::Rect::from_min_max(p(0.15, 0.2), p(0.27, 0.8)), 1.0, pal.fg);
+            painter.rect_filled(egui::Rect::from_min_max(p(0.45, 0.2), p(0.85, 0.8)), 2.0, pal.accent);
+        }
+        Icon::Stencil => {
+            // an O with two bridges
+            let half = |a0: f32| -> Vec<Pos2> { (0..=16).map(|k| { let a = a0 + (k as f32 / 16.0) * 2.6; p(0.5 + 0.3 * a.cos(), 0.5 + 0.3 * a.sin()) }).collect() };
+            painter.add(Shape::line(half(-1.3), Stroke::new(w * 2.2, pal.fg)));
+            painter.add(Shape::line(half(1.84), Stroke::new(w * 2.2, pal.fg)));
+        }
+        Icon::Warp => {
+            // a grid bent into an arch
+            for k in 0..3 {
+                let y0 = 0.35 + k as f32 * 0.2;
+                painter.add(Shape::line((0..=10).map(|j| { let t = j as f32 / 10.0; p(0.1 + 0.8 * t, y0 - 0.2 * (1.0 - (k as f32) * 0.3) * (std::f32::consts::PI * t).sin()) }).collect(), if k == 0 { ac } else { thin }));
+            }
+            for x in [0.1f32, 0.5, 0.9] {
+                let top = 0.35 - if x == 0.5 { 0.2 } else { 0.0 };
+                line(&[(x, top), (x, 0.75)], thin);
+            }
+        }
+        Icon::TextPath | Icon::TextCircle => {
+            // letters along a curve, or round a circle
+            if icon == Icon::TextCircle {
+                painter.circle_stroke(p(0.5, 0.55), s * 0.3, thin);
+            } else {
+                painter.add(Shape::line((0..=12).map(|k| { let t = k as f32 / 12.0; p(0.08 + 0.84 * t, 0.75 - 0.35 * (std::f32::consts::PI * t).sin()) }).collect(), thin));
+            }
+            painter.text(p(0.5, 0.3), egui::Align2::CENTER_CENTER, "Aa", egui::FontId::proportional(s * 0.32), pal.accent);
         }
         Icon::TestGrid => {
             // a 3 × 3 grid of squares getting darker
