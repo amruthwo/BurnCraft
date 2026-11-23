@@ -402,7 +402,7 @@ impl App {
         // shown as it burns: one pixel per dot at the layer's line interval and the size it burns at (kept to
         // a size the screen can hold)
         let (bw, bh) = (w * p2(s.xform.a, s.xform.b).len(), h * p2(s.xform.c, s.xform.d).len());
-        let mut interval = self.doc.cut(s.layer).map(|c| c.interval).unwrap_or(0.1).max(0.001);
+        let mut interval = self.doc.cut(s.layer).map(|c| s.cut.apply(c).interval).unwrap_or(0.1).max(0.001);
         let (nw, nh) = crate::imaging::burn_grid(bw, bh, interval, 16_000_000.0);
         let side = nw.max(nh) as f64;
         if side > 4096.0 {

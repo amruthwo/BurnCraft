@@ -29,6 +29,7 @@ pub fn all(ctx: &Context, app: &mut App, run: &mut Vec<Action>) {
     recover(ctx, app);
     export(ctx, app);
     pdf_page(ctx, app);
+    crate::matwin::all(ctx, app);
     toasts(ctx, app);
 }
 

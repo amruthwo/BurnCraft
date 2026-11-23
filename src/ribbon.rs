@@ -55,6 +55,7 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Preview", vec![Preview, PreviewPlay, LaserFrame]),
             ("Burn", vec![LaserStart, LaserPause, LaserStop]),
             ("Output", vec![ExportGcode, SaveLayerDefaults]),
+            ("Calibrate", vec![TestCalibrate, Materials]),
             ("Extras", vec![VariableText, Camera, Rotary]),
         ],
         RibbonTab::View => vec![

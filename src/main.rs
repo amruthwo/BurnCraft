@@ -7,6 +7,7 @@ mod actions;
 mod app;
 mod autosave;
 mod barcode;
+mod calibrate;
 mod camera;
 mod burn;
 mod canvas;
@@ -29,6 +30,8 @@ mod lbrn;
 mod mcp;
 mod nest;
 mod nodes;
+mod materials;
+mod matwin;
 mod model;
 mod ops;
 mod panels;
@@ -132,6 +135,13 @@ impl Root {
                     app.sel = vec![2];
                 }
                 "camera" => app.win_camera = true,
+                // Test & Calibrate, and a power × speed grid with one square selected
+                "test" => app.win_test = true,
+                "testgrid" => {
+                    app.doc = calibrate::generate(&calibrate::TestParams::default(), &app.settings.device);
+                    app.sel = vec![7];
+                    app.side_tab = app::SideTab::Properties;
+                }
                 // a halftone picture selected, with its settings in Properties
                 "halftone" => {
                     if let Some(i) = app.doc.shapes.iter().position(|s| s.is_bitmap()) {

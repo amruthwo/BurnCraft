@@ -378,6 +378,17 @@ pub struct App {
     /// A newer version was found by the check at start-up and already announced.
     pub update_announced: bool,
     pub win_rotary: bool,
+    /// Test & Calibrate, and the kerf gap measured in its kerf gauge (mm).
+    pub win_test: bool,
+    pub test_params: crate::calibrate::TestParams,
+    pub kerf_gap: f64,
+    /// The material library, its window (and whether it lists only this laser's), and a material being saved.
+    pub materials: crate::materials::Library,
+    pub win_materials: bool,
+    pub materials_this_laser: bool,
+    /// The library was changed and not saved yet (saved once a drag or typing ends).
+    pub materials_dirty: bool,
+    pub save_material: Option<crate::matwin::SaveMaterial>,
     pub win_nest: bool,
     /// A nest being worked out.
     pub nest_job: Option<crate::nest::running::Running>,
@@ -415,13 +426,14 @@ pub enum Pick {
     CameraPhoto = 4,
     Lbdev = 5,
     Shortcuts = 6,
+    Materials = 7,
 }
 
 impl Pick {
     /// (used when the browser hands a picked file over)
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn from_u8(v: u8) -> Option<Pick> {
-        [Pick::Open, Pick::Import, Pick::VarText, Pick::CameraPhoto, Pick::Lbdev, Pick::Shortcuts].into_iter().find(|p| *p as u8 == v)
+        [Pick::Open, Pick::Import, Pick::VarText, Pick::CameraPhoto, Pick::Lbdev, Pick::Shortcuts, Pick::Materials].into_iter().find(|p| *p as u8 == v)
     }
 }
 
@@ -530,6 +542,14 @@ impl App {
             update: std::sync::Arc::new(std::sync::Mutex::new(crate::update::State::Idle)),
             update_announced: false,
             win_rotary: false,
+            win_test: false,
+            test_params: Default::default(),
+            kerf_gap: 0.0,
+            materials: crate::materials::Library::load(),
+            win_materials: false,
+            materials_this_laser: true,
+            materials_dirty: false,
+            save_material: None,
             win_nest: false,
             rename: None,
             rename_click: None,
@@ -754,6 +774,18 @@ impl App {
         self.tool = t;
         self.canvas.cancel();
         self.canvas.rel_picks.clear();
+    }
+
+    pub fn save_materials(&mut self, now: f64) {
+        self.materials_dirty = false;
+        if let Err(e) = self.materials.save() {
+            self.error(format!("Could not save the materials: {e}"), now);
+        }
+    }
+
+    /// Open "Save as material" for these settings (a layer's, or a test square's).
+    pub fn ask_save_material(&mut self, cut: CutSetting, pulse_width: Option<u16>, link_layer: Option<usize>) {
+        self.save_material = Some(crate::matwin::SaveMaterial { cut, pulse_width, name: String::new(), thickness: 0.0, notes: String::new(), link_layer });
     }
 
     pub fn save_settings(&mut self, now: f64) {
@@ -990,6 +1022,14 @@ impl App {
             Pick::Open => self.open_bytes(name, bytes, path, now),
             Pick::Import => self.import_bytes(name, bytes, now),
             Pick::Lbdev => self.import_lbdev(&String::from_utf8_lossy(&bytes), now),
+            Pick::Materials => match crate::materials::Library::from_json(&String::from_utf8_lossy(&bytes)) {
+                Ok(l) => {
+                    let (added, replaced) = self.materials.merge(l);
+                    self.save_materials(now);
+                    self.toast(format!("Materials imported: {added} new, {replaced} updated"), now);
+                }
+                Err(e) => self.error(e, now),
+            },
             Pick::Shortcuts => match serde_json::from_slice::<serde_json::Value>(&bytes) {
                 Ok(v) => {
                     self.settings.keymap = crate::shortcuts::Keymap::from_json(&v);
@@ -1907,6 +1947,11 @@ impl App {
                     self.job = Some(job);
                     return;
                 }
+                if let Some(e) = galvo::pulse_width_problem(&job, &self.settings.device.galvo) {
+                    self.job = Some(job);
+                    self.error(e, now);
+                    return;
+                }
                 let (entries, outside) = galvo::job_list(&job, &self.doc, &self.settings.device);
                 if outside > 0 || job.skipped_outside > 0 {
                     self.error(format!("{} piece(s) outside the lens field are left out.", outside + job.skipped_outside), now);
@@ -2141,6 +2186,8 @@ impl App {
             Action::VariableText => self.win_vartext = !self.win_vartext,
             Action::Camera => self.win_camera = !self.win_camera,
             Action::Rotary => self.win_rotary = !self.win_rotary,
+            Action::TestCalibrate => self.win_test = !self.win_test,
+            Action::Materials => self.win_materials = !self.win_materials,
             Action::Nest => self.win_nest = true,
             Action::WelcomeTour => {
                 self.win_settings = false;

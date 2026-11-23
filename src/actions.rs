@@ -124,6 +124,8 @@ actions! {
     SaveLayerDefaults: "Save Layer Defaults", Layers, "Laser", "Use this project's layer settings for every new project", [], [];
     VariableText: "Variable Text", VarText, "Laser", "Fill text from a .csv / .txt file, a serial number or the date, a new row each job", [], [];
     Camera: "Camera", Camera, "Laser", "Show the laser's camera picture on the bed, and line it up", [], [];
+    TestCalibrate: "Test & Calibrate", TestGrid, "Laser", "Make test designs: power × speed, cut-through, line interval, focus, kerf and fit, picture modes, colour on metal, fine detail", [], [];
+    Materials: "Materials", Materials, "Laser", "Your saved settings for each material: apply them to layers, share them as a file", [], [];
     Rotary: "Rotary", Rotary, "Laser", "Burn around cylinders with a roller or chuck rotary", [], [];
     Nest: "Nest", Nest, "Arrange", "Move and rotate the selected shapes to fit tightly on the work area or another shape", [], [];
     NewTab: "New Tab", NewTab, "File", "Open an empty project in a new tab", ["Ctrl+Shift+N"], ["Ctrl+Shift+N"];

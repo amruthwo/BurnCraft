@@ -14,7 +14,7 @@ pub enum Icon {
     Connect, Home, Frame, Start, Pause, Stop,
     Search, Keyboard, Settings, Notes, Exit, Layers, Laser, Image,
     Lock, Unlock, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Dot, Refresh,
-    Pen, Arc, Star, Trim, Tabs, MaskIn, MaskOut, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
+    Pen, Arc, Star, Trim, Tabs, MaskIn, MaskOut, TestGrid, Materials, Fillet, Barcode, NodeSmooth, NodeCorner, NodeLine, NodeCurve, NodeInsert, NodeBreak,
     CircArray, Wand, Lasso, SelOutline, NewTab, DuplicateTab, CloseTab, Dimension,
     Relate, Construction, MirrorLine, PathPattern, AlignPath, Join, Help, Tour, VarText, Camera, Rotary, Nest, PlayPreview,
 }
@@ -555,6 +555,23 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             painter.add(Shape::rect_stroke(egui::Rect::from_min_max(p(0.08, 0.15), p(0.92, 0.85)), 1.0, thin, egui::StrokeKind::Middle));
             painter.circle(p(0.5, 0.5), s * 0.26, if inside { pal.soft } else { Color32::TRANSPARENT }, ac);
             line(&[(0.12, 0.8), (0.35, 0.55), (0.5, 0.68), (0.7, 0.42), (0.88, 0.62)], if inside { thin } else { st });
+        }
+        Icon::TestGrid => {
+            // a 3 × 3 grid of squares getting darker
+            for gx in 0..3 {
+                for gy in 0..3 {
+                    let k = (gx + gy) as f32 / 4.0;
+                    let r = egui::Rect::from_min_size(p(0.1 + gx as f32 * 0.29, 0.1 + gy as f32 * 0.29), egui::vec2(0.22 * s, 0.22 * s));
+                    painter.rect_filled(r, 1.0, pal.fg.gamma_multiply(0.25 + 0.75 * k));
+                }
+            }
+        }
+        Icon::Materials => {
+            // a stack of three sheets
+            for (i, y) in [0.62f32, 0.44, 0.26].iter().enumerate() {
+                let pts = vec![p(0.1, *y + 0.12), p(0.55, *y + 0.24), p(0.9, *y + 0.1), p(0.45, *y - 0.02)];
+                painter.add(Shape::convex_polygon(pts, if i == 2 { pal.soft } else { Color32::TRANSPARENT }, if i == 2 { ac } else { thin }));
+            }
         }
         Icon::Tabs => {
             // a square cut with two gaps, and a tab marker in one

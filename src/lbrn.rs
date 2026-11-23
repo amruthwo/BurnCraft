@@ -144,6 +144,8 @@ pub fn parse_cut(n: &Node) -> CutSetting {
             "floodFill" => cs.fill_individually = b,
             // BurnCraft's own: tabs (LightBurn ignores it)
             "BcTabs" => cs.tabs = serde_json::from_str(&v).unwrap_or_default(),
+            "BcMaterial" => cs.material = v.chars().take(200).collect(),
+            "BcPulseWidth" => cs.pulse_width = f.filter(|v| v.is_finite()).map(|v| v.clamp(1.0, 65535.0) as u16),
             _ => cs.extra.push((k, v)),
         }
     }
@@ -310,7 +312,7 @@ fn parse_path_data(n: &Node, shared: &mut Shared) -> Option<PathData> {
     Some(PathData { verts, prims })
 }
 
-const KNOWN_ATTRS: &[&str] = &["Type", "CutIndex", "Locked", "W", "H", "Cr", "Rx", "Ry", "N", "Str", "Font", "Data", "File", "VertID", "PrimID", "Gamma", "Contrast", "Brightness", "Name", "HasBackupPath", "ForceCase", "Weld", "LS", "BcCase", "BcTabs", "BcDither", "BcInvert", "BcHalftone", "BcSlices"];
+const KNOWN_ATTRS: &[&str] = &["Type", "CutIndex", "Locked", "W", "H", "Cr", "Rx", "Ry", "N", "Str", "Font", "Data", "File", "VertID", "PrimID", "Gamma", "Contrast", "Brightness", "Name", "HasBackupPath", "ForceCase", "Weld", "LS", "BcCase", "BcTabs", "BcDither", "BcInvert", "BcHalftone", "BcSlices", "BcCut"];
 
 fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Option<Shape> {
     let ty = n.attr("Type").unwrap_or("Path");
@@ -413,6 +415,7 @@ fn parse_shape(n: &Node, shared: &mut Shared, warnings: &mut Vec<String>) -> Opt
     s.locked = n.attr_bool("Locked").unwrap_or(false);
     s.name = n.attr("Name").unwrap_or("").to_string();
     s.tabs = n.attr("BcTabs").map(parse_tabs).unwrap_or_default();
+    s.cut = n.attr("BcCut").and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
     for (k, v) in &n.attrs {
         if !KNOWN_ATTRS.contains(&k.as_str()) {
             s.extra_attrs.push((k.clone(), v.clone()));
@@ -479,6 +482,10 @@ fn shape_node(s: &Shape) -> Node {
     }
     if !s.tabs.is_empty() {
         n.set("BcTabs", tabs_attr(&s.tabs));
+    }
+    // a shape's own settings (test pattern cells); LightBurn ignores this and uses the layer's
+    if !s.cut.is_empty() {
+        n.set("BcCut", serde_json::to_string(&s.cut).unwrap_or_default());
     }
     if !s.name.is_empty() {
         n.set("Name", s.name.clone());
@@ -600,6 +607,12 @@ pub fn cut_node(c: &CutSetting) -> Node {
     }
     if c.tabs != Tabs::default() {
         v("BcTabs", serde_json::to_string(&c.tabs).unwrap_or_default());
+    }
+    if !c.material.is_empty() {
+        v("BcMaterial", c.material.clone());
+    }
+    if let Some(p) = c.pulse_width {
+        v("BcPulseWidth", p.to_string());
     }
     for (k, val) in c.extra.iter().filter(|(k, _)| !k.starts_with(crate::burn::KEEP)) {
         v(k, val.clone());

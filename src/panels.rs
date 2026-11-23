@@ -237,6 +237,57 @@ fn layers(ui: &mut Ui, app: &mut App) {
             swatch(ui, idx, 18.0, false);
             ui.label(RichText::new(format!("{} settings", layer_name(idx))).strong());
         });
+        // the material preset these settings came from, or apply one
+        {
+            let now = ui.input(|i| i.time);
+            let linked = app.doc.cut(idx).map(|c| c.material.clone()).unwrap_or_default();
+            let linked_title = app.materials.get(&linked).map(|m| m.title());
+            let mut pick: Option<crate::materials::Material> = None;
+            let mut unlink = false;
+            let mut save = false;
+            ui.horizontal(|ui| {
+                ui.label("Material");
+                let shown = match (&linked_title, linked.is_empty()) {
+                    (Some(t), _) => t.clone(),
+                    (None, false) => "(not in your library)".into(),
+                    (None, true) => "None".into(),
+                };
+                let laser = app.settings.device.name.clone();
+                egui::ComboBox::from_id_salt("layer_material").selected_text(shown).width(200.0).show_ui(ui, |ui| {
+                    let mut ms: Vec<&crate::materials::Material> = app.materials.materials.iter().filter(|m| m.for_laser(&laser)).collect();
+                    ms.sort_by_key(|m| m.title().to_lowercase());
+                    if ms.is_empty() {
+                        ui.label(RichText::new("No materials for this laser yet").italics());
+                    }
+                    for m in ms {
+                        if ui.selectable_label(m.id == linked, m.title()).on_hover_text(m.summary()).clicked() {
+                            pick = Some(m.clone());
+                        }
+                    }
+                });
+                if !linked.is_empty() && ui.small_button("Unlink").on_hover_text("Keep these settings, but no longer as that material").clicked() {
+                    unlink = true;
+                }
+                if ui.small_button("Save as material…").on_hover_text("Keep this layer's settings in your material library").clicked() {
+                    save = true;
+                }
+            });
+            if let Some(m) = pick {
+                app.checkpoint();
+                m.apply(app.doc.cut_mut(idx));
+                app.touch();
+                app.toast(format!("{} applied", m.title()), now);
+            }
+            if unlink {
+                app.checkpoint();
+                app.doc.cut_mut(idx).material.clear();
+                app.touch();
+            }
+            if save {
+                let c = app.doc.cut(idx).cloned().unwrap_or_else(|| CutSetting::new(idx));
+                app.ask_save_material(c, None, Some(idx));
+            }
+        }
         let before = app.doc.cut(idx).cloned();
         let u = app.settings.units;
         let c = app.doc.cut_mut(idx);
@@ -334,8 +385,15 @@ fn layers(ui: &mut Ui, app: &mut App) {
             ui.end_row();
         });
         let after = app.doc.cut(idx).cloned();
-        if before.map(|b| format!("{:?}", b)) != after.map(|a| format!("{:?}", a)) {
+        if before.as_ref().map(|b| format!("{:?}", b)) != after.as_ref().map(|a| format!("{:?}", a)) {
             changed = true;
+            // settings changed by hand (not just the name) no longer match the material they came from
+            let key = |c: &CutSetting| format!("{:?}", CutSetting { name: String::new(), ..c.clone() });
+            if let (Some(b), Some(a)) = (&before, &after) {
+                if !a.material.is_empty() && key(b) != key(a) {
+                    app.doc.cut_mut(idx).material.clear();
+                }
+            }
         }
     }
     if changed {
@@ -719,6 +777,25 @@ fn properties(ui: &mut Ui, app: &mut App) {
         app.checkpoint();
         app.doc.shapes[i].set_layer(layer);
         app.doc.sync_cuts();
+    }
+    // a test square's own settings (in place of some of its layer's)
+    let own = app.doc.shapes[i].cut;
+    if !own.is_empty() {
+        ui.separator();
+        ui.label(RichText::new("Own settings").strong());
+        ui.label(RichText::new(format!("{} (the rest from layer {})", own.summary(), layer_name(app.doc.shapes[i].layer))).size(11.5));
+        ui.horizontal(|ui| {
+            if ui.button("Save as material…").on_hover_text("This square burned the way you wanted? Keep its settings in your material library").clicked() {
+                let l = app.doc.shapes[i].layer;
+                let base = app.doc.cut(l).cloned().unwrap_or_else(|| CutSetting::new(l));
+                app.ask_save_material(own.apply(&base), own.pulse_width, None);
+            }
+            if ui.button("Use the layer's").on_hover_text("Forget this shape's own settings: it burns like the rest of its layer").clicked() {
+                app.checkpoint();
+                app.doc.shapes[i].cut = CutOverride::default();
+                app.touch();
+            }
+        });
     }
 }
 

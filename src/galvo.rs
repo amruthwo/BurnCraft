@@ -201,13 +201,14 @@ pub struct ListBuilder<'a> {
     freq: Option<f64>,
     fpk_set: bool,
     delays_set: bool,
-    pulse_set: bool,
+    /// The pulse width last written.
+    pulse: Option<u16>,
     pub port: u16,
 }
 
 impl<'a> ListBuilder<'a> {
     pub fn new(s: &'a GalvoSettings, port: u16) -> Self {
-        ListBuilder { entries: Vec::new(), s, last: (0x8000, 0x8000), mark_speed: None, jump_speed: None, power: None, freq: None, fpk_set: false, delays_set: false, pulse_set: false, port }
+        ListBuilder { entries: Vec::new(), s, last: (0x8000, 0x8000), mark_speed: None, jump_speed: None, power: None, freq: None, fpk_set: false, delays_set: false, pulse: None, port }
     }
 
     fn write(&mut self, c: u16, v: [u16; 5]) {
@@ -272,11 +273,15 @@ impl<'a> ListBuilder<'a> {
                 Source::Co2 | Source::Uv => self.write(LIST_MARK_POWER_RATIO, [(200.0 * percent / khz.max(0.001)).round().clamp(0.0, 65535.0) as u16, 0, 0, 0, 0]),
             }
         }
-        if self.s.source == Source::Fiber && !self.pulse_set {
-            if let Some(pw) = self.s.pulse_width {
+    }
+
+    /// MOPA fiber pulse width, written when it changes (test cells can each have their own).
+    pub fn set_pulse_width(&mut self, pw: Option<u16>) {
+        if self.s.source == Source::Fiber {
+            if let Some(pw) = pw.filter(|p| self.pulse != Some(*p)) {
                 self.write(LIST_FIBER_YLPM_PULSE_WIDTH, [pw, 0, 0, 0, 0]);
+                self.pulse = Some(pw);
             }
-            self.pulse_set = true;
         }
     }
 
@@ -318,6 +323,16 @@ impl<'a> ListBuilder<'a> {
     }
 }
 
+/// A job where some marks have their own pulse width (test squares, a layer's) and others don't, on a
+/// machine without its own pulse width setting: the others would keep whatever was set last. Says so.
+pub fn pulse_width_problem(job: &Job, s: &GalvoSettings) -> Option<String> {
+    let burns = job.moves.iter().filter(|m| m.power > 0.0);
+    let (with, without) = burns.fold((false, false), |(w, wo), m| (w || m.pulse_width.is_some(), wo || m.pulse_width.is_none()));
+    (s.source == Source::Fiber && s.pulse_width.is_none() && with && without).then(|| {
+        "Some shapes in this job have their own pulse width and others don't. Set the laser's pulse width in Settings → Laser (galvo), so the others burn at a known one, or burn the test on its own.".to_string()
+    })
+}
+
 /// The job as one command list. Returns the entries and how many marks fell outside the lens field.
 pub fn job_list(job: &Job, doc: &Document, dev: &Device) -> (Vec<[u16; 6]>, usize) {
     let s = &dev.galvo;
@@ -332,9 +347,11 @@ pub fn job_list(job: &Job, doc: &Document, dev: &Device) -> (Vec<[u16; 6]>, usiz
             outside += 1;
             continue;
         };
-        let khz = doc.cut(m.layer).map(|c| c.frequency / 1000.0).filter(|f| *f > 0.0).unwrap_or(s.frequency);
+        // the move's own frequency (a test cell's), else its layer's, else the machine's
+        let khz = Some(m.frequency / 1000.0).filter(|f| *f > 0.0).or_else(|| doc.cut(m.layer).map(|c| c.frequency / 1000.0).filter(|f| *f > 0.0)).unwrap_or(s.frequency);
         b.set_jump_speed(s.jump_speed);
         b.set_power((m.power as f64 * 100.0).clamp(0.0, 100.0), khz);
+        b.set_pulse_width(m.pulse_width.or(s.pulse_width));
         b.set_mark_speed(m.speed);
         b.set_delays();
         b.jump(a);

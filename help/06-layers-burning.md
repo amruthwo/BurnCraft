@@ -14,6 +14,30 @@ Each palette colour is a layer with its own settings (Layers panel):
 - **Burn** and **Show** switch a layer's output and visibility. T1 and T2 are tool layers and never burn (T2 holds construction lines).
 - **Save Layer Defaults** keeps your settings for new projects.
 
+## Test & Calibrate
+
+**Test & Calibrate** (Laser tab) makes a labelled test design in a new tab, ready to burn:
+
+- **Power × speed grid**: squares (filled, outlined or a gradient picture), each at its own power (across) and speed (down).
+- **Cut-through ladder**: squares cut at different speeds and numbers of passes. The ones that drop out cut through.
+- **Line interval (LPI)**: filled squares at different intervals. The lowest lines per inch that still looks solid is the fastest.
+- **Focus ramp**: a line with a scale. Prop one end of the material up; the thinnest part of the line is in focus.
+- **Kerf and fit**: a kerf gauge (ten strips in a frame) and a row of slots for your material's thickness. Push the strips to one side, measure the gap and type it in the window: it works out the kerf offset and can put it on a layer. The slot that fits snugly shows how much to allow for joints.
+- **Picture modes strip**: the same gradient in every picture mode.
+- **Colour on metal**: squares at different frequencies and pulse widths, for MOPA fiber lasers on stainless steel or titanium.
+- **Fine detail ladder**: text from 4 mm down to 0.5 mm, holes from 2 mm to 0.2 mm, and line pairs with gaps down to 0.05 mm.
+
+Each square of a test burns with its **own settings** (shown in Properties when you select it), so a whole grid fits on one layer. The labels are on their own layer, burned lightly: check its settings before burning.
+
+## Materials
+
+The **Materials** library keeps the settings that worked, for each material, thickness and laser.
+
+- After a test, select the square you liked best and press **Save as material…** in Properties. Or save a whole layer's settings with **Save as material…** in the Layers panel.
+- A layer's **Material** list applies a saved material to it. **Unlink** keeps the settings but forgets which material they came from.
+- **Materials** (Laser tab) lists your library: rename, add notes, apply, delete, and **Export…** or **Import…** it as a file to share.
+- The library is kept in BurnCraft's data folder (in the browser: the browser's storage for this site).
+
 ## Tabs by hand
 
 **Tabs** (Modify tab, Cutting) puts tabs exactly where you want them: click on a cut outline to add one, click a tab (the small orange marks) to remove it. Tabs placed by hand replace the layer's automatic ones on that outline, and they're used even when the layer's Tabs box is off. The layer's **Tab width** sets their length. Preview shows the gaps.

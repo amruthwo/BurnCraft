@@ -99,6 +99,8 @@ pub struct CutSetting {
     pub kerf: f64,
     /// PWM / pulse frequency for fiber and diode modules that support it.
     pub frequency: f64,
+    /// MOPA fiber pulse width (ns); none = the machine's setting.
+    pub pulse_width: Option<u16>,
     /// Fill each closed shape on its own instead of sweeping across the whole layer (LightBurn "Flood Fill").
     pub fill_individually: bool,
     /// LightBurn's "Constant Power Mode" (file key `forceConstantPower`): this layer burns with M3 (constant power)
@@ -106,8 +108,75 @@ pub struct CutSetting {
     pub force_constant_power: bool,
     /// Tabs (bridges) on this layer's cuts: short places the laser skips so parts stay in the sheet.
     pub tabs: Tabs,
+    /// The material preset these settings came from (its id in the material library), or empty.
+    pub material: String,
     /// Keys BurnCraft doesn't edit, kept so files round-trip.
     pub extra: Vec<(String, String)>,
+}
+
+/// Settings one shape burns with instead of its layer's: the cells of a test pattern each have their own
+/// speed and power on one layer. Anything left empty comes from the layer.
+#[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct CutOverride {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speed: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_power: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_power: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub passes: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<f64>,
+    /// Hz (galvo and PWM sources).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frequency: Option<f64>,
+    /// MOPA fiber pulse width setting (ns).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pulse_width: Option<u16>,
+}
+
+impl CutOverride {
+    pub fn is_empty(&self) -> bool {
+        *self == CutOverride::default()
+    }
+    /// The layer's settings with these in place of its own (kept within sensible limits).
+    pub fn apply(&self, c: &CutSetting) -> CutSetting {
+        let ok = |v: Option<f64>, lo: f64, hi: f64, d: f64| v.filter(|v| v.is_finite()).map(|v| v.clamp(lo, hi)).unwrap_or(d);
+        let mut c = c.clone();
+        c.speed = ok(self.speed, 0.01, 100_000.0, c.speed);
+        c.max_power = ok(self.max_power, 0.0, 100.0, c.max_power);
+        c.min_power = ok(self.min_power, 0.0, 100.0, c.min_power);
+        c.passes = self.passes.map(|p| p.clamp(1, 1000)).unwrap_or(c.passes);
+        c.interval = ok(self.interval, 0.001, 100.0, c.interval);
+        c.frequency = ok(self.frequency, 1.0, 10_000_000.0, c.frequency);
+        c.pulse_width = self.pulse_width.or(c.pulse_width);
+        c
+    }
+    /// A short description, e.g. "300 mm/s · 40%".
+    pub fn summary(&self) -> String {
+        let mut p = Vec::new();
+        if let Some(v) = self.speed {
+            p.push(format!("{} mm/s", crate::geom::fmt_num((v * 10.0).round() / 10.0)));
+        }
+        if let Some(v) = self.max_power {
+            p.push(format!("{}%", crate::geom::fmt_num((v * 10.0).round() / 10.0)));
+        }
+        if let Some(v) = self.passes {
+            p.push(format!("{v} pass{}", if v == 1 { "" } else { "es" }));
+        }
+        if let Some(v) = self.interval {
+            p.push(format!("{} mm interval", crate::geom::fmt_num(v)));
+        }
+        if let Some(v) = self.frequency {
+            p.push(format!("{} kHz", crate::geom::fmt_num((v / 100.0).round() / 10.0)));
+        }
+        if let Some(v) = self.pulse_width {
+            p.push(format!("{v} ns"));
+        }
+        p.join(" · ")
+    }
 }
 
 /// Automatic tabs on a cut layer. Shapes with tabs placed by hand (the Tabs tool) use those instead.
@@ -159,9 +228,11 @@ impl CutSetting {
             z_offset: 0.0,
             kerf: 0.0,
             frequency: Self::DEFAULT_FREQUENCY,
+            pulse_width: None,
             fill_individually: false,
             force_constant_power: false,
             tabs: Tabs::default(),
+            material: String::new(),
             extra: Vec::new(),
         }
     }
@@ -518,6 +589,8 @@ pub struct Shape {
     /// Tabs placed by hand (the Tabs tool), as points on the outline in the shape's own coordinates. They
     /// replace the layer's automatic tabs on the outlines they sit on.
     pub tabs: Vec<P2>,
+    /// This shape's own settings in place of some of its layer's (test patterns).
+    pub cut: CutOverride,
 }
 
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -528,7 +601,7 @@ pub fn new_id() -> u64 {
 
 impl Shape {
     pub fn new(kind: ShapeKind, xform: Xform, layer: usize) -> Shape {
-        Shape { id: new_id(), kind, xform, layer, locked: false, name: String::new(), extra_attrs: Vec::new(), tabs: Vec::new() }
+        Shape { id: new_id(), kind, xform, layer, locked: false, name: String::new(), extra_attrs: Vec::new(), tabs: Vec::new(), cut: CutOverride::default() }
     }
 
     pub fn type_name(&self) -> &'static str {

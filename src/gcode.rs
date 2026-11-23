@@ -300,6 +300,9 @@ pub struct Move {
     pub power: f32,
     pub layer: usize,
     pub speed: f64,
+    /// The source's frequency (Hz) and MOPA pulse width for this move, when its settings give them.
+    pub frequency: f64,
+    pub pulse_width: Option<u16>,
 }
 
 #[derive(Default, Clone)]
@@ -441,6 +444,9 @@ struct Emitter<'a> {
     dev: &'a Device,
     /// The work area in job coordinates, when known (overscan stays inside it).
     bed: Option<BBox>,
+    /// The frequency and pulse width of the settings being burned (recorded in each move).
+    frequency: f64,
+    pulse_width: Option<u16>,
     /// Tabs placed by hand, in job coordinates, with the layers of the shape they were placed on.
     tab_points: Vec<(P2, Vec<usize>)>,
     out: String,
@@ -465,7 +471,7 @@ impl<'a> Emitter<'a> {
         self.travel_len += d;
         self.secs += d / self.dev.rapid_speed.max(1.0);
         self.travel_secs += d / self.dev.rapid_speed.max(1.0);
-        self.moves.push(Move { from: self.pos, to, power: 0.0, layer: 0, speed: self.dev.rapid_speed });
+        self.moves.push(Move { from: self.pos, to, power: 0.0, layer: 0, speed: self.dev.rapid_speed, frequency: 0.0, pulse_width: None });
         self.pos = to;
     }
     /// A laser-off move at burning speed (overscan, and gaps within a scan line), so the head doesn't stop
@@ -487,7 +493,7 @@ impl<'a> Emitter<'a> {
         self.travel_len += d;
         self.secs += d / speed.max(0.1);
         self.travel_secs += d / speed.max(0.1);
-        self.moves.push(Move { from: self.pos, to, power: 0.0, layer: 0, speed });
+        self.moves.push(Move { from: self.pos, to, power: 0.0, layer: 0, speed, frequency: 0.0, pulse_width: None });
         self.pos = to;
     }
     fn cut(&mut self, to: P2, power_pct: f64, speed: f64, layer: usize) {
@@ -513,7 +519,7 @@ impl<'a> Emitter<'a> {
         self.cut_len += d;
         self.secs += d / speed.max(0.1);
         self.cut_secs += d / speed.max(0.1);
-        self.moves.push(Move { from: self.pos, to, power: (power_pct / 100.0) as f32, layer, speed });
+        self.moves.push(Move { from: self.pos, to, power: (power_pct / 100.0) as f32, layer, speed, frequency: self.frequency, pulse_width: self.pulse_width });
         self.pos = to;
     }
 }
@@ -550,7 +556,7 @@ pub fn build_job(doc: &Document, dev: &Device, only: Option<&[usize]>) -> Job {
 
 /// Build the job, placed on the laser as `place` says (Start from).
 pub fn build_job_placed(doc: &Document, dev: &Device, only: Option<&[usize]>, place: &Placement) -> Job {
-    let mut em = Emitter { dev, bed: place.bed, tab_points: Vec::new(), out: String::new(), pos: place.start, moves: Vec::new(), cut_len: 0.0, travel_len: 0.0, secs: 0.0, cut_secs: 0.0, travel_secs: 0.0, last_f: -1.0, last_s: -1.0 };
+    let mut em = Emitter { dev, bed: place.bed, frequency: 0.0, pulse_width: None, tab_points: Vec::new(), out: String::new(), pos: place.start, moves: Vec::new(), cut_len: 0.0, travel_len: 0.0, secs: 0.0, cut_secs: 0.0, travel_secs: 0.0, last_f: -1.0, last_s: -1.0 };
     em.out.push_str(&format!("; BurnCraft {} - GRBL G-code\n; Device: {} ({} x {} mm)\n", env!("CARGO_PKG_VERSION"), dev.name, dev.width, dev.height));
     // Header: "G00 G17 G40 " (rapid, XY plane, no cutter compensation) + G21 (G20 in inches) + G54,
     // then G90 for absolute coordinates
@@ -628,15 +634,32 @@ pub fn build_job_placed(doc: &Document, dev: &Device, only: Option<&[usize]>, pl
         if cs.air_assist {
             em.out.push_str("M8\n");
         }
-        for _pass in 0..cs.passes.max(1) {
-            match cs.mode {
-                CutMode::Line => emit_lines(&mut em, &on, cs),
-                CutMode::Fill | CutMode::OffsetFill => emit_fill(&mut em, &on, cs),
-                CutMode::FillLine => {
-                    emit_fill(&mut em, &on, cs);
-                    emit_lines(&mut em, &on, cs);
+        // shapes with their own settings (test pattern cells) burn as their own groups, in list order
+        let mut groups: Vec<(CutOverride, Vec<&(Shape, Xform)>)> = Vec::new();
+        for l in on {
+            match groups.iter_mut().find(|(o, _)| *o == l.0.cut) {
+                Some((_, v)) => v.push(l),
+                None => groups.push((l.0.cut, vec![l])),
+            }
+        }
+        for (over, on) in &groups {
+            let c = over.apply(cs);
+            let cs = &c;
+            if !over.is_empty() {
+                em.out.push_str(&format!("; {}\n", over.summary()));
+            }
+            em.frequency = cs.frequency;
+            em.pulse_width = cs.pulse_width;
+            for _pass in 0..cs.passes.max(1) {
+                match cs.mode {
+                    CutMode::Line => emit_lines(&mut em, on, cs),
+                    CutMode::Fill | CutMode::OffsetFill => emit_fill(&mut em, on, cs),
+                    CutMode::FillLine => {
+                        emit_fill(&mut em, on, cs);
+                        emit_lines(&mut em, on, cs);
+                    }
+                    CutMode::Image => emit_image(&mut em, on, cs),
                 }
-                CutMode::Image => emit_image(&mut em, &on, cs),
             }
         }
         if cs.air_assist {
