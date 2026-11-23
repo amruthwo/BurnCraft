@@ -29,19 +29,18 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Constrain", vec![ToggleConstruction, ToolRelate, ToolDimension]),
             ("Inspect", vec![ToolMeasure]),
         ],
+        // (Join, Convert to Path and Break Apart are on the Sketch tab; Group and Ungroup on Home and Arrange)
         RibbonTab::Modify => vec![
             ("Transform", vec![FlipH, FlipV, ToolMirrorLine, RotateCCW, RotateCW]),
-            ("Combine", vec![Weld, BoolUnion, BoolSubtract, BoolIntersect, JoinPaths]),
-            ("Shape", vec![Offset, GridArray, CircularArray, PathPattern, AlignToPath, EditArray, ConvertToPath, BreakApart]),
-            ("Group", vec![Group, Ungroup]),
+            ("Combine", vec![Weld, BoolUnion, BoolSubtract, BoolIntersect]),
+            ("Shape", vec![Offset, ToolWarp, Bolden, StencilBridges]),
             ("Text", vec![TextOnPath, TextOnCircle]),
-            ("Warp", vec![ToolWarp, Bolden, StencilBridges]),
-            ("Cutting", vec![ToolTabs]),
         ],
         RibbonTab::Arrange => vec![
             ("Align", vec![AlignLeft, AlignVCenter, AlignRight, AlignTop, AlignHCenter, AlignBottom]),
             ("Distribute", vec![DistributeH, DistributeV]),
-            ("Position", vec![PageCenter, PushFront, PushBack]),
+            ("Position", vec![PageCenter, PushFront, PushBack, Group, Ungroup]),
+            ("Arrays", vec![GridArray, CircularArray, PathPattern, AlignToPath, EditArray]),
             ("Nest", vec![Nest]),
         ],
         RibbonTab::Image => vec![
@@ -57,6 +56,7 @@ pub fn groups(tab: RibbonTab) -> Vec<(&'static str, Vec<Action>)> {
             ("Preview", vec![Preview, PreviewPlay, LaserFrame]),
             ("Burn", vec![LaserStart, LaserPause, LaserStop]),
             ("Output", vec![ExportGcode, SaveLayerDefaults]),
+            ("Cutting", vec![ToolTabs]),
             ("Calibrate", vec![TestCalibrate, Materials]),
             ("Extras", vec![VariableText, Camera, Rotary]),
         ],
@@ -380,8 +380,10 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
     let mut pin_toggles = Vec::new();
     let avail = ui.available_width();
     let user = (app.settings.ribbon_labels, app.settings.ribbon_compact);
+    // (labels, compact): the chosen layout, small buttons with labels, then small icons in two rows (twice as
+    // many fit) before anything is folded away
     let mut levels = vec![user];
-    for l in [(true, true), (false, false)] {
+    for l in [(true, true), (false, true)] {
         if !levels.contains(&l) {
             levels.push(l);
         }
@@ -449,7 +451,7 @@ pub fn ribbon(ui: &mut Ui, app: &mut App) -> Vec<Action> {
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
                         // node operations, alignment and distribution are well known by their icons: small, no text
-                        let icons_only = compact && matches!(name, "Points" | "Align" | "Distribute");
+                        let icons_only = compact && (!labels || matches!(name, "Points" | "Align" | "Distribute"));
                         if icons_only {
                             let n = acts.len();
                             let per_row = n.div_ceil(2);

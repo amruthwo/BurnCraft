@@ -27,13 +27,13 @@ Press **Q** (or Sketch > Construction) to turn the selection into construction g
 
 ## Text on a path or a circle
 
-- **Text on Path** (Modify tab): select a text and a line or curve. The text runs along the curve and stays editable: change the words, font and size as usual. The curve is copied into the text, so you can delete it or keep it.
+- **Text on Path** (Modify tab, Text): select a text and a line or curve. The text runs along the curve and stays editable: change the words, font and size as usual. The curve is copied into the text, so you can delete it or keep it.
 - **Text on Circle**: select a text. It goes around a circle, over the top.
 - In Properties: **Radius** (circle), **Shift along** (move the text along the curve), **Inside** (circle: letters inside it along the bottom) or **Below the curve**, **Flip** (the other way round), and **Straighten** to put it back on a line.
 
 ## Warp
 
-Select shapes or text, then **Warp** (Modify tab). Choose **Arch**, **Arc**, **Bulge**, **Wave / flag**, **Rise** or **Fisheye** and drag the handle (or the Amount slider), or **Perspective** (drag the four corners) or **Mesh** (drag a 3 × 3 grid of handles). The canvas shows the result live; **Apply** keeps it. Warped shapes become paths; text becomes outlines, so the words can't be edited afterwards (Undo brings them back). Pictures aren't warped.
+Select shapes or text, then **Warp** (Modify tab, Shape). Choose **Arch**, **Arc**, **Bulge**, **Wave / flag**, **Rise** or **Fisheye** and drag the handle (or the Amount slider), or **Perspective** (drag the four corners) or **Mesh** (drag a 3 × 3 grid of handles). The canvas shows the result live; **Apply** keeps it. Warped shapes become paths; text becomes outlines, so the words can't be edited afterwards (Undo brings them back). Pictures aren't warped.
 
 ## Skew and rotating around a point
 
@@ -42,7 +42,7 @@ Select shapes or text, then **Warp** (Modify tab). Choose **Arch**, **Arc**, **B
 
 ## Bolden, thin and stencil bridges
 
-**Bolden / Thin** and **Stencil Bridges** (Modify tab) open one window:
+**Bolden / Thin** and **Stencil Bridges** (Modify tab, Shape) open one window:
 
 - **Bolden / Thin**: every edge of the selected shapes or text moves out by the amount (in, when it's negative). Good for text that's too thin to engrave, or for a little clearance.
 - **Stencil bridges**: for shapes cut out of a sheet as a stencil. A strip of the bridge width is left through every hole (the middle of an O, A, B…), so the piece inside stays joined to the sheet.

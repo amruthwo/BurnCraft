@@ -355,7 +355,7 @@ fn layers(ui: &mut Ui, app: &mut App) {
                     .on_hover_text("Moves cuts outward on outer edges and inward on holes, so parts come out at their drawn size. Use half the width of the cut line (measure a test cut). A negative value does the opposite, for inlays.");
                 ui.end_row();
                 ui.label("Tabs");
-                ui.checkbox(&mut c.tabs.on, "").on_hover_text("Leave short uncut places on each closed shape so parts stay in the sheet until you snap them out. Tabs you place by hand (Modify → Tabs) are always used.");
+                ui.checkbox(&mut c.tabs.on, "").on_hover_text("Leave short uncut places on each closed shape so parts stay in the sheet until you snap them out. Tabs you place by hand (Laser → Cutting → Tabs) are always used.");
                 ui.end_row();
                 ui.label("Tab width");
                 ui.add(u.len(&mut c.tabs.width, 0.0, 20.0, 0.01)).on_hover_text("How long each tab is along the outline (also for tabs placed by hand)");

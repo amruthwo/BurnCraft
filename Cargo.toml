@@ -1,6 +1,6 @@
 [package]
 name = "burncraft"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "BurnCraft: an open-source laser design and control app (LightBurn-compatible projects)"
 readme = "README.md"

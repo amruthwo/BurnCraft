@@ -59,7 +59,7 @@ The **Materials** library keeps the settings that worked, for each material, thi
 
 ## Tabs by hand
 
-**Tabs** (Modify tab, Cutting) puts tabs exactly where you want them: click on a cut outline to add one, click a tab (the small orange marks) to remove it. Tabs placed by hand replace the layer's automatic ones on that outline, and they're used even when the layer's Tabs box is off. The layer's **Tab width** sets their length. Preview shows the gaps.
+**Tabs** (Laser tab, Cutting) puts tabs exactly where you want them: click on a cut outline to add one, click a tab (the small orange marks) to remove it. Tabs placed by hand replace the layer's automatic ones on that outline, and they're used even when the layer's Tabs box is off. The layer's **Tab width** sets their length. Preview shows the gaps.
 
 ## Preview
 

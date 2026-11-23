@@ -557,15 +557,10 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             line(&[(0.12, 0.8), (0.35, 0.55), (0.5, 0.68), (0.7, 0.42), (0.88, 0.62)], if inside { thin } else { st });
         }
         Icon::Generators => {
-            // a gear
-            let teeth = 8;
-            let pts: Vec<Pos2> = (0..teeth * 4).map(|k| {
-                let a = k as f32 * std::f32::consts::TAU / (teeth * 4) as f32;
-                let r = if (k / 2) % 2 == 0 { 0.4 } else { 0.3 };
-                p(0.5 + r * a.cos(), 0.5 + r * a.sin())
-            }).collect();
-            painter.add(Shape::closed_line(pts, st));
-            painter.circle_stroke(p(0.5, 0.5), s * 0.1, ac);
+            // a finger-joint box: front face with fingers along its top, and the box's depth
+            line(&[(0.12, 0.88), (0.12, 0.38), (0.22, 0.38), (0.22, 0.3), (0.34, 0.3), (0.34, 0.38), (0.46, 0.38), (0.46, 0.3), (0.58, 0.3), (0.58, 0.38), (0.68, 0.38), (0.68, 0.88), (0.12, 0.88)], st);
+            line(&[(0.68, 0.38), (0.88, 0.2), (0.88, 0.7), (0.68, 0.88)], ac);
+            line(&[(0.22, 0.3), (0.42, 0.12), (0.88, 0.12), (0.88, 0.2)], ac);
         }
         Icon::Bolden => {
             // a thin and a bold bar
@@ -590,13 +585,16 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, pal: &Pal) {
             }
         }
         Icon::TextPath | Icon::TextCircle => {
-            // letters along a curve, or round a circle
+            // a "T" standing on a curve, or on a circle
             if icon == Icon::TextCircle {
-                painter.circle_stroke(p(0.5, 0.55), s * 0.3, thin);
+                painter.circle_stroke(p(0.5, 0.62), s * 0.3, ac);
+                line(&[(0.32, 0.1), (0.68, 0.1)], st);
+                line(&[(0.5, 0.1), (0.5, 0.3)], st);
             } else {
-                painter.add(Shape::line((0..=12).map(|k| { let t = k as f32 / 12.0; p(0.08 + 0.84 * t, 0.75 - 0.35 * (std::f32::consts::PI * t).sin()) }).collect(), thin));
+                painter.add(Shape::line((0..=12).map(|k| { let t = k as f32 / 12.0; p(0.08 + 0.84 * t, 0.85 - 0.3 * (std::f32::consts::PI * t).sin()) }).collect(), ac));
+                line(&[(0.3, 0.15), (0.7, 0.15)], st);
+                line(&[(0.5, 0.15), (0.5, 0.52)], st);
             }
-            painter.text(p(0.5, 0.3), egui::Align2::CENTER_CENTER, "Aa", egui::FontId::proportional(s * 0.32), pal.accent);
         }
         Icon::TestGrid => {
             // a 3 × 3 grid of squares getting darker

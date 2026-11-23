@@ -8,7 +8,7 @@
 
 ## Arrange
 
-Align, distribute, centre on the bed, bring to front or send to back, group and ungroup — in the Arrange tab.
+Align, distribute, centre on the bed, bring to front or send to back, group and ungroup, and the arrays (grid, circular, along a path) — in the Arrange tab.
 
 ## Nest
 
@@ -37,7 +37,7 @@ The result is previewed on the bed with how much of the sheet is used. **Apply**
 - **Pattern on Path**: copies along the last selected curve (number of copies or spacing, rotate and scale copies), following LightBurn's Copy Along Path.
 - **Align to Path**: moves the selected shapes onto a curve in their left-to-right order.
 
-Arrays stay editable: select any copy and press the **Edit array** button under the selection, double-click a copy, or use Edit Array in the Modify tab or Properties.
+Arrays stay editable: select any copy and press the **Edit array** button under the selection, double-click a copy, or use Edit Array in the Arrange tab (Arrays) or Properties.
 
 ## Offset
 
